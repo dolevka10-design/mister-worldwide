@@ -1,0 +1,17 @@
+{
+  "name": "mister-worldwide",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive 3D travel globe with Google Maps saved places and AI assistant.",
+  "scripts": {
+    "build:earth": "node scripts/build-earth-glb.mjs",
+    "import:takeout": "node scripts/import-new-takeout.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "s2-geometry": "^1.2.10"
+  },
+  "devDependencies": {
+    "three": "^0.161.0"
+  }
+}

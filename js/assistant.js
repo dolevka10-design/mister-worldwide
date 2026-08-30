@@ -213,12 +213,41 @@
       },
     },
     {
+      name: "update_country",
+      description: "Update a country's name, ISO flag code, or pin location on the globe.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          country: { type: "STRING", description: "Country name or id" },
+          name: { type: "STRING" },
+          iso: { type: "STRING", description: "2-letter ISO code for flag" },
+          lat: { type: "NUMBER" },
+          lng: { type: "NUMBER" },
+        },
+        required: ["country"],
+      },
+    },
+    {
       name: "remove_country",
       description: "Remove a country and all its places.",
       parameters: {
         type: "OBJECT",
         properties: { country: { type: "STRING" } },
         required: ["country"],
+      },
+    },
+    {
+      name: "delete_places",
+      description: "Delete multiple places by ids or by filter (country, city, category, name query).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          ids: { type: "ARRAY", items: { type: "STRING" }, description: "Specific place ids to delete" },
+          country: { type: "STRING" },
+          city: { type: "STRING" },
+          category: { type: "STRING" },
+          query: { type: "STRING", description: "Name/description substring match" },
+        },
       },
     },
     {
@@ -809,6 +838,21 @@
       return { ok: true, country };
     }
 
+    if (name === "update_country") {
+      const state = api.getState();
+      const countryId = resolveCountryId(args.country, state);
+      if (!countryId) return { ok: false, error: "Country not found" };
+      const country = state.countries.find((c) => c.id === countryId);
+      if (!country) return { ok: false, error: "Country not found" };
+      snapshot(`Update country ${country.name}`);
+      if (args.name != null) country.name = args.name;
+      if (args.iso != null) country.iso = String(args.iso).toLowerCase().slice(0, 2);
+      if (args.lat != null) country.lat = Number(args.lat);
+      if (args.lng != null) country.lng = Number(args.lng);
+      persistRefresh(state);
+      return { ok: true, country: { id: country.id, name: country.name, iso: country.iso, lat: country.lat, lng: country.lng, placeCount: country.placeCount } };
+    }
+
     if (name === "remove_country") {
       const state = api.getState();
       const countryId = resolveCountryId(args.country, state);
@@ -819,6 +863,34 @@
       state.places = state.places.filter((p) => p.countryId !== countryId);
       persistRefresh(state);
       return { ok: true, removed, placesRemoved: removed };
+    }
+
+    if (name === "delete_places") {
+      const state = api.getState();
+      let list = [...(state.places || [])];
+      const ids = Array.isArray(args.ids) ? args.ids.map(String) : [];
+      if (ids.length) {
+        list = list.filter((p) => ids.includes(p.id));
+      } else {
+        if (args.country) {
+          const cid = resolveCountryId(args.country, state);
+          if (cid) list = list.filter((p) => p.countryId === cid);
+        }
+        if (args.city) list = list.filter((p) => p.city.toLowerCase().includes(String(args.city).toLowerCase()));
+        if (args.category) list = list.filter((p) => p.category === args.category);
+        if (args.query) {
+          const q = String(args.query).toLowerCase();
+          list = list.filter((p) => `${p.name} ${p.description}`.toLowerCase().includes(q));
+        }
+      }
+      if (!list.length) return { ok: false, error: "No matching places to delete" };
+      snapshot(`Delete ${list.length} places`);
+      const removeIds = new Set(list.map((p) => p.id));
+      const touched = new Set(list.map((p) => p.countryId));
+      state.places = state.places.filter((p) => !removeIds.has(p.id));
+      for (const cid of touched) WorldStore.recalcCountry(state, cid);
+      persistRefresh(state);
+      return { ok: true, deleted: list.length, ids: [...removeIds].slice(0, 20) };
     }
 
     if (name === "import_csv_places") {
