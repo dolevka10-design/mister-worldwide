@@ -6,64 +6,19 @@ window.WorldGlobe = (() => {
   let container = null;
   let onCountryClick = null;
   let countries = [];
-  let earthGroup = null;
 
   const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
-  const EARTH_GLB = "assets/models/earth.glb";
   const EARTH_TEX = "assets/textures/earth.jpg";
   const EARTH_TEX_FALLBACK = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
-  const GLOBE_RADIUS = 100;
 
-  function loadTexture(url) {
-    return new Promise((resolve, reject) => {
-      new THREE.TextureLoader().load(url, resolve, undefined, reject);
-    });
-  }
-
-  function addTexturedSphere(group, texture) {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(GLOBE_RADIUS, 72, 72),
-      new THREE.MeshPhongMaterial({
-        map: texture,
-        shininess: 12,
-        specular: 0x333333,
-      })
-    );
-    mesh.name = "EarthSphere";
-    group.add(mesh);
-    return mesh;
-  }
-
-  async function loadEarthModel(group) {
-    let texture = null;
-    try { texture = await loadTexture(EARTH_TEX); }
-    catch { texture = await loadTexture(EARTH_TEX_FALLBACK); }
-
-    if (typeof THREE.GLTFLoader !== "undefined") {
-      try {
-        const gltf = await new Promise((resolve, reject) => {
-          new THREE.GLTFLoader().load(EARTH_GLB, resolve, undefined, reject);
-        });
-        const root = gltf.scene;
-        root.traverse((obj) => {
-          if (!obj.isMesh) return;
-          obj.material = new THREE.MeshPhongMaterial({
-            map: texture,
-            shininess: 12,
-            specular: 0x333333,
-          });
-        });
-        root.scale.setScalar(GLOBE_RADIUS);
-        root.name = "EarthModel";
-        group.add(root);
-        return;
-      } catch (err) {
-        console.warn("earth.glb load failed, using textured sphere", err);
-      }
+  async function resolveEarthTexture() {
+    try {
+      const head = await fetch(EARTH_TEX, { method: "HEAD" });
+      if (head.ok) return EARTH_TEX;
+    } catch {
+      /* use fallback */
     }
-
-    addTexturedSphere(group, texture);
+    return EARTH_TEX_FALLBACK;
   }
 
   function makeFlagPin(d) {
@@ -87,12 +42,11 @@ window.WorldGlobe = (() => {
 
     if (typeof Globe !== "function") throw new Error("globe.gl not loaded");
 
-    earthGroup = new THREE.Group();
-    await loadEarthModel(earthGroup);
+    const globeImage = await resolveEarthTexture();
 
     globe = Globe()
-      .globeObject(earthGroup)
-      .showGlobe(false)
+      .globeImageUrl(globeImage)
+      .showGlobe(true)
       .showAtmosphere(true)
       .atmosphereColor("#7cf0ff")
       .atmosphereAltitude(0.14)
@@ -102,11 +56,6 @@ window.WorldGlobe = (() => {
 
     const scene = globe.scene();
     scene.background = null;
-
-    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-    const sun = new THREE.DirectionalLight(0xffffff, 1.15);
-    sun.position.set(4, 2, 3);
-    scene.add(ambient, sun);
 
     globe
       .polygonsData([])
@@ -140,6 +89,17 @@ window.WorldGlobe = (() => {
 
     updatePins(countries);
     window.addEventListener("resize", onResize);
+
+    if (el.clientWidth === 0 || el.clientHeight === 0) {
+      const ro = new ResizeObserver(() => {
+        if (!globe || !container) return;
+        if (container.clientWidth > 0 && container.clientHeight > 0) onResize();
+      });
+      ro.observe(el);
+    } else {
+      onResize();
+    }
+
     return globe;
   }
 
@@ -170,12 +130,15 @@ window.WorldGlobe = (() => {
     globe.width(container.clientWidth).height(container.clientHeight);
   }
 
+  function resize() {
+    onResize();
+  }
+
   function destroy() {
     window.removeEventListener("resize", onResize);
     if (container) container.innerHTML = "";
     globe = null;
-    earthGroup = null;
   }
 
-  return { init, updatePins, focusCountry, destroy };
+  return { init, updatePins, focusCountry, destroy, resize };
 })();

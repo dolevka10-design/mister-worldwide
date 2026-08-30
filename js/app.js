@@ -249,6 +249,28 @@ window.WorldApp = (() => {
     $("app-root")?.classList.toggle("hidden", show);
   }
 
+  async function ensureGlobe() {
+    const el = $("globe");
+    if (!el || $("app-root")?.classList.contains("hidden")) return;
+
+    if (!ready) {
+      try {
+        await WorldGlobe.init(el, {
+          countries: state.countries,
+          onCountryClick: selectCountry,
+        });
+        ready = true;
+      } catch (e) {
+        console.error("Globe init failed", e);
+        toast("Globe failed to load — try refreshing the page", "error");
+      }
+      return;
+    }
+
+    WorldGlobe.resize();
+    WorldGlobe.updatePins(state.countries);
+  }
+
   function bindAuth() {
     const errEl = $("auth-error");
     const setErr = (msg) => {
@@ -313,15 +335,7 @@ window.WorldApp = (() => {
     }
     CountryMeta.init(state.countries);
     refresh();
-    if (!ready) {
-      await WorldGlobe.init($("globe"), {
-        countries: state.countries,
-        onCountryClick: selectCountry,
-      });
-      ready = true;
-    } else {
-      WorldGlobe.updatePins(state.countries);
-    }
+    await ensureGlobe();
   }
 
   async function start() {
