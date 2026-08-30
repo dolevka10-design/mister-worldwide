@@ -4,6 +4,9 @@
   "private": true,
   "description": "Interactive 3D travel globe with Google Maps saved places and AI assistant.",
   "scripts": {
+    "build": "node scripts/prepare-dist.js",
+    "deploy": "npm run build && wrangler deploy",
+    "preview": "npm run build && wrangler dev",
     "build:earth": "node scripts/build-earth-glb.mjs",
     "import:takeout": "node scripts/import-new-takeout.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -12,6 +15,7 @@
     "s2-geometry": "^1.2.10"
   },
   "devDependencies": {
-    "three": "^0.161.0"
+    "three": "^0.161.0",
+    "wrangler": "^4.127.1"
   }
 }
