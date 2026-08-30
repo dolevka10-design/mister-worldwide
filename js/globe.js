@@ -4,22 +4,13 @@
 window.WorldGlobe = (() => {
   let globe = null;
   let container = null;
+  let resizeObserver = null;
   let onCountryClick = null;
   let countries = [];
 
   const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
-  const EARTH_TEX = "assets/textures/earth.jpg";
-  const EARTH_TEX_FALLBACK = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
-
-  async function resolveEarthTexture() {
-    try {
-      const head = await fetch(EARTH_TEX, { method: "HEAD" });
-      if (head.ok) return EARTH_TEX;
-    } catch {
-      /* use fallback */
-    }
-    return EARTH_TEX_FALLBACK;
-  }
+  const EARTH_TEX_CDN = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
+  const EARTH_TEX_LOCAL = "assets/textures/earth.jpg";
 
   function makeFlagPin(d) {
     const el = document.createElement("div");
@@ -35,33 +26,51 @@ window.WorldGlobe = (() => {
     return el;
   }
 
+  function bindResize(el) {
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = new ResizeObserver(() => {
+      if (!globe || !container) return;
+      if (container.clientWidth > 0 && container.clientHeight > 0) onResize();
+    });
+    resizeObserver.observe(el);
+    window.addEventListener("resize", onResize);
+  }
+
   async function init(el, opts = {}) {
+    if (!el) throw new Error("Globe container missing");
+    if (typeof Globe !== "function") throw new Error("globe.gl not loaded");
+
+    if (globe && container !== el) destroy();
+    if (globe && container === el) {
+      updatePins(opts.countries || countries);
+      onResize();
+      return globe;
+    }
+
     container = el;
     onCountryClick = opts.onCountryClick || (() => {});
     countries = opts.countries || [];
 
-    if (typeof Globe !== "function") throw new Error("globe.gl not loaded");
-
-    const globeImage = await resolveEarthTexture();
-
     globe = Globe()
-      .globeImageUrl(globeImage)
+      .globeImageUrl(EARTH_TEX_CDN)
       .showGlobe(true)
       .showAtmosphere(true)
       .atmosphereColor("#7cf0ff")
       .atmosphereAltitude(0.14)
-      .backgroundColor("rgba(0,0,0,0)")
-      .width(el.clientWidth)
-      .height(el.clientHeight)(el);
+      .backgroundColor("rgba(5,5,8,0.85)")
+      .width(Math.max(el.clientWidth, 1))
+      .height(Math.max(el.clientHeight, 320))(el);
 
-    const scene = globe.scene();
-    scene.background = null;
+    // Retry local texture if CDN is blocked/slow.
+    const img = new Image();
+    img.onload = () => { if (globe) globe.globeImageUrl(EARTH_TEX_LOCAL); };
+    img.src = EARTH_TEX_LOCAL;
 
     globe
       .polygonsData([])
       .polygonCapColor(() => "rgba(0,0,0,0)")
       .polygonSideColor(() => "rgba(0,0,0,0)")
-      .polygonStrokeColor(() => "rgba(255,255,255,0.2)")
+      .polygonStrokeColor(() => "rgba(255,255,255,0.22)")
       .polygonAltitude(0.01);
 
     globe
@@ -88,17 +97,8 @@ window.WorldGlobe = (() => {
     }
 
     updatePins(countries);
-    window.addEventListener("resize", onResize);
-
-    if (el.clientWidth === 0 || el.clientHeight === 0) {
-      const ro = new ResizeObserver(() => {
-        if (!globe || !container) return;
-        if (container.clientWidth > 0 && container.clientHeight > 0) onResize();
-      });
-      ro.observe(el);
-    } else {
-      onResize();
-    }
+    bindResize(el);
+    onResize();
 
     return globe;
   }
@@ -127,18 +127,28 @@ window.WorldGlobe = (() => {
 
   function onResize() {
     if (!globe || !container) return;
-    globe.width(container.clientWidth).height(container.clientHeight);
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    globe.width(w).height(h);
   }
 
   function resize() {
     onResize();
   }
 
-  function destroy() {
-    window.removeEventListener("resize", onResize);
-    if (container) container.innerHTML = "";
-    globe = null;
+  function isReady() {
+    return !!globe && !!container?.querySelector("canvas");
   }
 
-  return { init, updatePins, focusCountry, destroy, resize };
+  function destroy() {
+    window.removeEventListener("resize", onResize);
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = null;
+    if (container) container.innerHTML = "";
+    globe = null;
+    container = null;
+  }
+
+  return { init, updatePins, focusCountry, destroy, resize, isReady };
 })();

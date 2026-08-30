@@ -59,7 +59,8 @@ const LIST_HINTS = {
   "Lisbon.csv": { country: "Portugal", city: "Lisbon" },
   "Norway.csv": { country: "Norway", city: "" },
   "Rio De Janeiro.csv": { country: "Brazil", city: "Rio de Janeiro" },
-  "Slovenia.csv": { country: "Slovenia", city: "" },
+  "Slovenia.csv": { city: "" },
+  "Croatia.csv": { city: "" },
   "Hong Kong - Macau.csv": { country: "Hong Kong", city: "Hong Kong" },
   "NYC Bagels.csv": { country: "United States", city: "New York" },
   "NYC Burgers.csv": { country: "United States", city: "New York" },
@@ -410,12 +411,12 @@ async function resolvePlace(place, geocodeCache) {
 
   if (lat == null || lng == null) return { ok: false, reason: "no_coordinates" };
 
-  if (!country) {
-    const rev = await reverseCountry(lat, lng);
-    if (rev?.country) {
-      country = rev.country;
-      if (!city && rev.city) city = rev.city;
-    }
+  const rev = await reverseCountry(lat, lng);
+  if (rev?.country) {
+    country = rev.country;
+    if (!city && rev.city) city = rev.city;
+  } else if (!country && hint.country) {
+    country = hint.country;
   }
 
   const countryId = ensureCountry(country);

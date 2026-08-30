@@ -52,7 +52,11 @@ window.WorldApp = (() => {
     renderStats();
     renderCountryList();
     if (selectedCountry) renderCountryPanel();
-    WorldGlobe.updatePins(state.countries);
+    if (WorldGlobe.isReady?.()) {
+      WorldGlobe.updatePins(state.countries);
+    } else if (!$("app-root")?.classList.contains("hidden")) {
+      ensureGlobe();
+    }
   }
 
   function renderStats() {
@@ -257,7 +261,7 @@ window.WorldApp = (() => {
     return WorldStore.reconcileState(next);
   }
 
-  async function waitForGlobeLib(timeoutMs = 10000) {
+  async function waitForGlobeLib(timeoutMs = 15000) {
     const start = Date.now();
     while (typeof Globe !== "function") {
       if (Date.now() - start > timeoutMs) throw new Error("globe.gl not loaded");
@@ -265,34 +269,49 @@ window.WorldApp = (() => {
     }
   }
 
-  async function waitForLayout(el) {
-    if (el.clientWidth > 0 && el.clientHeight > 0) return;
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  async function waitForLayout(el, attempts = 20) {
+    for (let i = 0; i < attempts; i++) {
+      if (el.clientWidth > 0 && el.clientHeight > 0) return;
+      await new Promise((r) => requestAnimationFrame(r));
+    }
   }
 
   async function ensureGlobe() {
     const el = $("globe");
-    if (!el || $("app-root")?.classList.contains("hidden")) return;
+    const root = $("app-root");
+    if (!el || root?.classList.contains("hidden")) return;
 
     try {
       await waitForGlobeLib();
       await waitForLayout(el);
 
-      if (!ready) {
+      if (!ready || !WorldGlobe.isReady?.()) {
         await WorldGlobe.init(el, {
-          countries: state.countries,
+          countries: state?.countries || [],
           onCountryClick: selectCountry,
         });
         ready = true;
-        return;
+      } else {
+        WorldGlobe.resize();
+        WorldGlobe.updatePins(state?.countries || []);
       }
-
-      WorldGlobe.resize();
-      WorldGlobe.updatePins(state.countries);
     } catch (e) {
       console.error("Globe init failed", e);
+      ready = false;
       toast("Globe failed to load — try refreshing the page", "error");
     }
+  }
+
+  function watchMainView() {
+    const root = $("app-root");
+    if (!root || root._globeWatch) return;
+    root._globeWatch = true;
+    const observer = new MutationObserver(() => {
+      if (!root.classList.contains("hidden")) ensureGlobe();
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    window.addEventListener("load", () => ensureGlobe());
+    window.addEventListener("orientationchange", () => setTimeout(() => ensureGlobe(), 200));
   }
 
   function bindAuth() {
@@ -367,6 +386,7 @@ window.WorldApp = (() => {
   async function start() {
     bindUi();
     bindAuth();
+    watchMainView();
     await WorldStore.loadSeed();
     state = WorldStore.reconcileState(WorldStore.loadState());
     CountryMeta.init(state.countries);
