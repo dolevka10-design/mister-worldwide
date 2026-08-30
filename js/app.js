@@ -1,0 +1,359 @@
+/**
+ * Mister Worldwide — main app shell
+ */
+window.WorldApp = (() => {
+  let state = null;
+  let user = null;
+  let ready = false;
+  let selectedCountry = null;
+  let viewMode = "category"; // category | city
+  let filterCategory = "";
+  let filterQuery = "";
+
+  const $ = (id) => document.getElementById(id);
+
+  function toast(msg, type = "info") {
+    const el = $("toast");
+    if (!el) return;
+    el.textContent = msg;
+    el.className = `toast toast-${type} show`;
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove("show"), 3200);
+  }
+
+  function persist() {
+    WorldStore.saveState(state);
+    if (user?.uid && WorldCloud.configured) {
+      WorldCloud.scheduleSave(user.uid, {
+        countries: state.countries,
+        places: state.places,
+        overrides: state.overrides,
+        updatedAt: state.updatedAt,
+      });
+    }
+    WorldGlobe.updatePins(state.countries);
+    renderCountryPanel();
+    renderStats();
+  }
+
+  function getState() { return state; }
+
+  function setState(next, { skipPersist } = {}) {
+    state = next;
+    if (!skipPersist) persist();
+    return state;
+  }
+
+  function cloneState() {
+    return JSON.parse(JSON.stringify(state));
+  }
+
+  function refresh() {
+    renderStats();
+    renderCountryList();
+    if (selectedCountry) renderCountryPanel();
+    WorldGlobe.updatePins(state.countries);
+  }
+
+  function renderStats() {
+    const total = state.places.length;
+    const countries = state.countries.filter((c) => c.placeCount > 0).length;
+    $("stat-places").textContent = total.toLocaleString();
+    $("stat-countries").textContent = countries;
+  }
+
+  function renderCountryList() {
+    const el = $("country-list");
+    if (!el) return;
+    el.innerHTML = state.countries
+      .filter((c) => c.placeCount > 0)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(
+        (c) => `
+      <button type="button" class="country-chip ${selectedCountry === c.id ? "active" : ""}" data-country="${c.id}">
+        <img src="${CountryMeta.flagUrl(c.iso, 20)}" alt="" width="20" height="14" loading="lazy"/>
+        <span>${c.name}</span>
+        <small>${c.placeCount}</small>
+      </button>`
+      )
+      .join("");
+    el.querySelectorAll("[data-country]").forEach((btn) => {
+      btn.addEventListener("click", () => selectCountry(btn.dataset.country));
+    });
+  }
+
+  function selectCountry(countryId) {
+    selectedCountry = countryId;
+    filterCategory = "";
+    filterQuery = "";
+    const q = $("place-search");
+    if (q) q.value = "";
+    WorldGlobe.focusCountry(countryId);
+    renderCountryList();
+    renderCountryPanel();
+    $("country-panel")?.classList.add("open");
+  }
+
+  function renderCountryPanel() {
+    const panel = $("country-panel");
+    if (!panel || !selectedCountry) return;
+    const country = state.countries.find((c) => c.id === selectedCountry);
+    if (!country) return;
+
+    $("panel-flag").src = CountryMeta.flagUrl(country.iso, 80);
+    $("panel-flag").alt = country.name;
+    $("panel-title").textContent = country.name;
+    $("panel-count").textContent = `${country.placeCount} saved places`;
+
+    let places = WorldStore.placesByCountry(state, selectedCountry, {
+      category: filterCategory || undefined,
+      query: filterQuery || undefined,
+      sort: viewMode === "city" ? "city" : "name",
+    });
+
+    const cats = [...new Set(WorldStore.placesByCountry(state, selectedCountry).map((p) => p.category))];
+    const catFilter = $("category-filter");
+    if (catFilter) {
+      catFilter.innerHTML = `<option value="">All categories</option>` +
+        cats.sort((a, b) => PlaceCategorize.label(a).localeCompare(PlaceCategorize.label(b)))
+          .map((c) => `<option value="${c}" ${filterCategory === c ? "selected" : ""}>${PlaceCategorize.label(c)}</option>`)
+          .join("");
+    }
+
+    const body = $("panel-body");
+    if (!body) return;
+
+    if (viewMode === "city") {
+      const groups = WorldStore.groupByCity(places);
+      body.innerHTML = groups.map(([city, items]) => `
+        <section class="place-group">
+          <h3 class="group-title">${city} <span class="muted">(${items.length})</span></h3>
+          <ul class="place-list">${items.map(placeCard).join("")}</ul>
+        </section>
+      `).join("") || emptyMsg();
+    } else {
+      const groups = WorldStore.groupByCategory(places);
+      body.innerHTML = groups.map(([cat, items]) => `
+        <section class="place-group">
+          <h3 class="group-title">${PlaceCategorize.label(cat)} <span class="muted">(${items.length})</span></h3>
+          <ul class="place-list">${items.map(placeCard).join("")}</ul>
+        </section>
+      `).join("") || emptyMsg();
+    }
+  }
+
+  function placeCard(p) {
+    return `
+      <li class="place-card">
+        <div class="place-main">
+          <strong>${esc(p.name)}</strong>
+          <span class="place-meta">${esc(p.city)} · ${PlaceCategorize.label(p.category)}</span>
+        </div>
+        ${p.url ? `<a class="place-link" href="${esc(p.url)}" target="_blank" rel="noopener">Maps</a>` : ""}
+      </li>`;
+  }
+
+  function emptyMsg() {
+    return `<p class="muted panel-empty">No places match your filters.</p>`;
+  }
+
+  function esc(s) {
+    return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  }
+
+  function bindUi() {
+    $("btn-close-panel")?.addEventListener("click", () => {
+      $("country-panel")?.classList.remove("open");
+      selectedCountry = null;
+      renderCountryList();
+    });
+
+    $("view-category")?.addEventListener("click", () => {
+      viewMode = "category";
+      $("view-category").classList.add("active");
+      $("view-city").classList.remove("active");
+      renderCountryPanel();
+    });
+    $("view-city")?.addEventListener("click", () => {
+      viewMode = "city";
+      $("view-city").classList.add("active");
+      $("view-category").classList.remove("active");
+      renderCountryPanel();
+    });
+
+    $("category-filter")?.addEventListener("change", (e) => {
+      filterCategory = e.target.value;
+      renderCountryPanel();
+    });
+
+    $("place-search")?.addEventListener("input", (e) => {
+      filterQuery = e.target.value.trim();
+      renderCountryPanel();
+    });
+
+    $("btn-export-csv")?.addEventListener("click", () => {
+      if (!selectedCountry) return toast("Select a country first", "warn");
+      const csv = WorldStore.exportCountryCsv(state, selectedCountry);
+      const c = state.countries.find((x) => x.id === selectedCountry);
+      downloadBlob(csv, `${c?.name || "country"}-places.csv`, "text/csv");
+      toast("CSV exported");
+    });
+
+    $("btn-export-json")?.addEventListener("click", () => {
+      downloadBlob(JSON.stringify(state, null, 2), "mister-worldwide.json", "application/json");
+      toast("JSON exported");
+    });
+
+    $("import-file")?.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        if (file.name.endsWith(".csv") && selectedCountry) {
+          const added = WorldStore.importCsvPlaces(state, selectedCountry, text);
+          persist();
+          toast(`Imported ${added.length} places`);
+        } else {
+          const parsed = JSON.parse(text);
+          if (parsed.places && parsed.countries) {
+            state = { ...state, ...parsed };
+            persist();
+            toast("JSON imported");
+          } else throw new Error("Invalid JSON");
+        }
+      } catch (err) {
+        toast(err.message || "Import failed", "error");
+      }
+      e.target.value = "";
+    });
+
+    $("btn-import")?.addEventListener("click", () => $("import-file")?.click());
+    $("btn-reset")?.addEventListener("click", () => {
+      if (!confirm("Reset all places to seed data? Your edits will be lost.")) return;
+      state = WorldStore.defaultState();
+      persist();
+      toast("Reset to seed data");
+    });
+  }
+
+  function downloadBlob(content, name, type) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([content], { type }));
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function showAuth(show) {
+    $("auth-gate")?.classList.toggle("hidden", !show);
+    $("app-root")?.classList.toggle("hidden", show);
+  }
+
+  function bindAuth() {
+    const errEl = $("auth-error");
+    const setErr = (msg) => {
+      if (!errEl) return;
+      errEl.hidden = !msg;
+      errEl.textContent = msg || "";
+    };
+
+    $("btn-google")?.addEventListener("click", async () => {
+      setErr("");
+      try { await WorldCloud.signInWithGoogle(); }
+      catch (e) { setErr(e.message || "Google sign-in failed"); }
+    });
+
+    $("auth-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      setErr("");
+      const email = $("auth-email")?.value;
+      const password = $("auth-password")?.value;
+      try { await WorldCloud.signIn(email, password); }
+      catch (err) { setErr(err.message || "Sign in failed"); }
+    });
+
+    $("btn-signup")?.addEventListener("click", async () => {
+      setErr("");
+      const email = $("auth-email")?.value;
+      const password = $("auth-password")?.value;
+      try { await WorldCloud.signUp(email, password); }
+      catch (err) { setErr(err.message || "Sign up failed"); }
+    });
+
+    $("btn-logout")?.addEventListener("click", () => WorldCloud.signOut());
+  }
+
+  async function onUser(u) {
+    user = u;
+    if (u) {
+      WorldStore.setUserEmail(u.email);
+      $("user-chip").textContent = u.email || u.displayName || "Signed in";
+      showAuth(false);
+      const cloud = await WorldCloud.loadFromCloud(u.uid);
+      if (cloud?.places?.length) {
+        state = { ...WorldStore.loadState(), ...cloud };
+        WorldStore.saveState(state);
+      } else {
+        state = WorldStore.loadState();
+        WorldCloud.scheduleSave(u.uid, state);
+      }
+      WorldCloud.listenCloud(u.uid, (remote) => {
+        if (WorldCloud.isApplyingRemote()) return;
+        state = { ...state, ...remote };
+        WorldStore.saveState(state);
+        refresh();
+      });
+      WorldAssistant?.bindUser?.({ uid: u.uid, email: u.email, displayName: u.displayName });
+    } else {
+      WorldStore.setUserEmail("local");
+      state = WorldStore.loadState();
+      showAuth(WorldCloud.configured);
+      $("user-chip").textContent = WorldCloud.configured ? "" : "Local mode";
+      WorldAssistant?.unbindUser?.();
+    }
+    CountryMeta.init(state.countries);
+    refresh();
+    if (!ready) {
+      await WorldGlobe.init($("globe"), {
+        countries: state.countries,
+        onCountryClick: selectCountry,
+      });
+      ready = true;
+    } else {
+      WorldGlobe.updatePins(state.countries);
+    }
+  }
+
+  async function start() {
+    bindUi();
+    bindAuth();
+    await WorldStore.loadSeed();
+    state = WorldStore.loadState();
+    CountryMeta.init(state.countries);
+
+    if (!WorldCloud.configured) {
+      $("auth-config-hint").hidden = false;
+      $("auth-config-hint").textContent = "Firebase not configured — running in local-only mode.";
+      await onUser(null);
+      return;
+    }
+
+    const init = WorldCloud.initFirebase();
+    if (!init.ok) {
+      await onUser(null);
+      return;
+    }
+
+    WorldCloud.onAuthStateChanged(async (u, err) => {
+      if (err) toast(err.message, "error");
+      await onUser(u);
+    });
+  }
+
+  return {
+    start, ready: () => ready, getState, setState, cloneState, persist, refresh, toast,
+    selectCountry, get selectedCountry() { return selectedCountry; },
+  };
+})();
+
+document.addEventListener("DOMContentLoaded", () => WorldApp.start());

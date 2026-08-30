@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAllowlisted() {
+      return request.auth != null
+        && request.auth.token.email in [
+          'dolevka10@gmail.com',
+          'shirleibovich94@gmail.com'
+        ];
+    }
+
+    match /planner/{docId} {
+      allow read: if isAllowlisted()
+        && (request.auth.uid == docId || docId == 'shared');
+      allow write: if isAllowlisted()
+        && request.auth.uid == docId;
+    }
+
+    match /worldData/{docId} {
+      allow read, write: if isAllowlisted()
+        && request.auth.uid == docId;
+    }
+
+    match /assistantChats/{userId} {
+      allow read, write: if isAllowlisted()
+        && request.auth.uid == userId;
+    }
+  }
+}

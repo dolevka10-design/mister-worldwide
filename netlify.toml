@@ -1,0 +1,31 @@
+[build]
+  publish = "."
+  command = "echo 'static site — no build'"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[redirects]]
+  from = "/api/llm/groq/*"
+  to = "https://api.groq.com/openai/v1/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/llm/openrouter/*"
+  to = "https://openrouter.ai/api/v1/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Mister Worldwide — 3D Travel Globe</title>
+    <meta name="description" content="Interactive 3D globe of countries to visit with Google Maps places, categories, and AI assistant." />
+    <meta name="theme-color" content="#050508" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/globe.gl@2/dist/globe.gl.min.js" defer></script>
+  </head>
+  <body>
+    <div id="auth-gate" class="auth-gate hidden">
+      <div class="auth-card card">
+        <p class="auth-eyebrow">Private access</p>
+        <h1 class="brand auth-brand">Mister Worldwide</h1>
+        <p class="tagline auth-sub">Your 3D travel globe — sign in to sync across devices.</p>
+        <button type="button" class="btn btn-google" id="btn-google">Continue with Google</button>
+        <div class="auth-divider"><span>or email</span></div>
+        <form id="auth-form" class="auth-form">
+          <div class="field"><label for="auth-email">Email</label><input id="auth-email" type="email" autocomplete="username" required /></div>
+          <div class="field"><label for="auth-password">Password</label><input id="auth-password" type="password" autocomplete="current-password" required minlength="6" /></div>
+          <p class="auth-error muted" id="auth-error" hidden></p>
+          <div class="auth-actions">
+            <button class="btn btn-primary" type="submit" id="btn-signin">Sign in</button>
+            <button class="btn btn-secondary" type="button" id="btn-signup">Create account</button>
+          </div>
+        </form>
+        <p class="hint" id="auth-config-hint" hidden></p>
+      </div>
+    </div>
+
+    <div id="app-root" class="app-shell hidden">
+      <header class="topbar">
+        <div class="brand-block">
+          <h1 class="brand">Mister Worldwide</h1>
+          <p class="tagline">Rotate the globe · tap a pin · explore your saved places</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="stats">
+            <span><strong id="stat-countries">0</strong> countries</span>
+            <span><strong id="stat-places">0</strong> places</span>
+          </div>
+          <span class="user-chip muted" id="user-chip"></span>
+          <button class="btn btn-ghost" id="btn-export-json" type="button">Export</button>
+          <button class="btn btn-ghost" id="btn-import" type="button">Import</button>
+          <button class="btn btn-danger" id="btn-reset" type="button">Reset</button>
+          <button class="btn btn-ghost" id="btn-logout" type="button">Log out</button>
+          <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden />
+        </div>
+      </header>
+
+      <main class="globe-layout">
+        <aside class="sidebar">
+          <h2 class="sidebar-title">Countries</h2>
+          <div id="country-list" class="country-list"></div>
+        </aside>
+        <div id="globe" class="globe-canvas" aria-label="3D world globe"></div>
+      </main>
+
+      <aside id="country-panel" class="country-panel">
+        <header class="panel-header">
+          <img id="panel-flag" class="panel-flag" src="" alt="" width="48" height="36" />
+          <div>
+            <h2 id="panel-title">Country</h2>
+            <p class="muted" id="panel-count"></p>
+          </div>
+          <button type="button" class="btn btn-ghost panel-close" id="btn-close-panel" aria-label="Close">✕</button>
+        </header>
+        <div class="panel-toolbar">
+          <input id="place-search" type="search" placeholder="Search places…" class="search-input" />
+          <select id="category-filter" class="pill-select"></select>
+          <div class="view-toggle">
+            <button type="button" class="tab active" id="view-category">By category</button>
+            <button type="button" class="tab" id="view-city">By city</button>
+          </div>
+          <button type="button" class="btn btn-secondary" id="btn-export-csv">Export CSV</button>
+        </div>
+        <div id="panel-body" class="panel-body"></div>
+      </aside>
+    </div>
+
+    <!-- AI Assistant -->
+    <button type="button" class="assist-fab" id="assist-fab" aria-label="Open AI assistant">✦</button>
+    <section class="assist-panel" id="assist-panel" hidden>
+      <header class="assist-head">
+        <div>
+          <strong>Travel AI</strong>
+          <p class="muted assist-sub" id="assist-sub">Add · remove · revise countries &amp; places</p>
+        </div>
+        <div class="assist-head-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="assist-undo">Undo</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="assist-key">Key</button>
+          <select id="assist-model" class="pill-select assist-model"></select>
+          <button type="button" class="btn btn-ghost btn-sm" id="assist-close">✕</button>
+        </div>
+      </header>
+      <div class="assist-log" id="assist-log"></div>
+      <form class="assist-form" id="assist-form">
+        <input id="assist-input" type="text" placeholder="Add a museum in Tokyo, import CSV, list restaurants in Paris…" autocomplete="off" />
+        <button type="submit" class="btn btn-primary">Send</button>
+      </form>
+    </section>
+
+    <div id="toast" class="toast" role="status"></div>
+
+    <script src="js/firebase-config.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="js/countries.js"></script>
+    <script src="js/categorize.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/cloud.js"></script>
+    <script src="js/globe.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/assistant.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => WorldAssistant?.initUi?.());
+    </script>
+  </body>
+</html>
