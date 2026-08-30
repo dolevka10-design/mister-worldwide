@@ -374,6 +374,7 @@ async function resolvePlace(place, geocodeCache) {
   let lat = cached?.lat ?? cached?.latitude ?? null;
   let lng = cached?.lon ?? cached?.lng ?? cached?.longitude ?? null;
   let country = cached?.country || hint.country || "";
+  if (/^unresolved$/i.test(country) || /^unknown$/i.test(country)) country = "";
   let city = cached?.city || hint.city || "";
 
   if (lat == null || lng == null) {
