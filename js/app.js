@@ -249,26 +249,50 @@ window.WorldApp = (() => {
     $("app-root")?.classList.toggle("hidden", show);
   }
 
+  function mergeCloudState(local, remote) {
+    if (!remote) return WorldStore.reconcileState(local);
+    const next = { ...local, ...remote };
+    if (!remote.places?.length && local?.places?.length) next.places = local.places;
+    if (!remote.countries?.length && local?.countries?.length) next.countries = local.countries;
+    return WorldStore.reconcileState(next);
+  }
+
+  async function waitForGlobeLib(timeoutMs = 10000) {
+    const start = Date.now();
+    while (typeof Globe !== "function") {
+      if (Date.now() - start > timeoutMs) throw new Error("globe.gl not loaded");
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  async function waitForLayout(el) {
+    if (el.clientWidth > 0 && el.clientHeight > 0) return;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  }
+
   async function ensureGlobe() {
     const el = $("globe");
     if (!el || $("app-root")?.classList.contains("hidden")) return;
 
-    if (!ready) {
-      try {
+    try {
+      await waitForGlobeLib();
+      await waitForLayout(el);
+
+      if (!ready) {
         await WorldGlobe.init(el, {
           countries: state.countries,
           onCountryClick: selectCountry,
         });
         ready = true;
-      } catch (e) {
-        console.error("Globe init failed", e);
-        toast("Globe failed to load — try refreshing the page", "error");
+        return;
       }
-      return;
-    }
 
-    WorldGlobe.resize();
-    WorldGlobe.updatePins(state.countries);
+      WorldGlobe.resize();
+      WorldGlobe.updatePins(state.countries);
+    } catch (e) {
+      console.error("Globe init failed", e);
+      toast("Globe failed to load — try refreshing the page", "error");
+    }
   }
 
   function bindAuth() {
@@ -312,23 +336,25 @@ window.WorldApp = (() => {
       $("user-chip").textContent = u.email || u.displayName || "Signed in";
       showAuth(false);
       const cloud = await WorldCloud.loadFromCloud(u.uid);
+      const local = WorldStore.reconcileState(WorldStore.loadState());
       if (cloud?.places?.length) {
-        state = { ...WorldStore.loadState(), ...cloud };
-        WorldStore.saveState(state);
+        state = mergeCloudState(local, cloud);
       } else {
-        state = WorldStore.loadState();
+        state = local;
         WorldCloud.scheduleSave(u.uid, state);
       }
+      WorldStore.saveState(state);
       WorldCloud.listenCloud(u.uid, (remote) => {
         if (WorldCloud.isApplyingRemote()) return;
-        state = { ...state, ...remote };
+        state = mergeCloudState(state, remote);
         WorldStore.saveState(state);
         refresh();
+        ensureGlobe();
       });
       WorldAssistant?.bindUser?.({ uid: u.uid, email: u.email, displayName: u.displayName });
     } else {
       WorldStore.setUserEmail("local");
-      state = WorldStore.loadState();
+      state = WorldStore.reconcileState(WorldStore.loadState());
       showAuth(WorldCloud.configured);
       $("user-chip").textContent = WorldCloud.configured ? "" : "Local mode";
       WorldAssistant?.unbindUser?.();
@@ -342,7 +368,7 @@ window.WorldApp = (() => {
     bindUi();
     bindAuth();
     await WorldStore.loadSeed();
-    state = WorldStore.loadState();
+    state = WorldStore.reconcileState(WorldStore.loadState());
     CountryMeta.init(state.countries);
 
     if (!WorldCloud.configured) {

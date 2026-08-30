@@ -76,6 +76,12 @@ window.WorldStore = (() => {
     }
   }
 
+  function reconcileState(state) {
+    if (!state?.countries?.length) return state;
+    for (const c of state.countries) recalcCountry(state, c.id);
+    return state;
+  }
+
   function placesByCountry(state, countryId, opts = {}) {
     let list = state.places.filter((p) => p.countryId === countryId);
     if (opts.category) list = list.filter((p) => p.category === opts.category);
@@ -181,7 +187,7 @@ window.WorldStore = (() => {
 
   return {
     loadSeed, loadState, saveState, defaultState, setUserEmail, uid,
-    nextPlaceId, recalcCountry, placesByCountry, groupByCity, groupByCategory,
+    nextPlaceId, recalcCountry, reconcileState, placesByCountry, groupByCity, groupByCategory,
     exportCountryCsv, importCsvPlaces,
   };
 })();
