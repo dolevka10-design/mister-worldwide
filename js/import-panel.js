@@ -105,20 +105,26 @@ window.WorldImportPanel = (() => {
     });
 
     $("import-url-btn")?.addEventListener("click", async () => {
-      const text = $("import-url-paste")?.value?.trim();
+      let text = $("import-url-paste")?.value?.trim();
       if (!text) return WorldApp.toast("Paste Maps URL(s) first", "warn");
+      const btn = $("import-url-btn");
       const el = $("import-url-result");
-      if (el) el.textContent = "Importing…";
+      if (btn) { btn.disabled = true; btn.textContent = "Importing…"; }
+      if (el) el.textContent = "Resolving link & importing…";
       try {
         const r = await WorldMapsImport.importMapsUrls(state, text);
         WorldApp.persist();
         WorldApp.refresh();
         const summary = `Added ${r.added.length}${r.geocoded ? ` (${r.geocoded} geocoded)` : ""}${r.skipped.length ? ` · skipped ${r.skipped.length}` : ""}`;
         if (el) el.textContent = summary;
-        WorldApp.toast(`Imported ${r.added.length} places`);
+        $("import-url-paste").value = "";
+        WorldApp.toast(`Imported ${r.added.length} place${r.added.length === 1 ? "" : "s"}`);
       } catch (e) {
-        if (el) el.textContent = e.message || "Import failed";
-        WorldApp.toast(e.message || "Import failed", "error");
+        const msg = e.message || "Import failed";
+        if (el) el.textContent = msg;
+        WorldApp.toast(msg, "error");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Import URLs"; }
       }
     });
   }

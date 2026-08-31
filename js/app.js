@@ -35,9 +35,9 @@ window.WorldApp = (() => {
     renderStats();
   }
 
-  function persistPlanner({ flush } = {}) {
+  function persistPlanner({ flush, skipPlannerRender } = {}) {
     persist({ touchPlanner: true });
-    WorldPlanner?.render?.(state);
+    if (!skipPlannerRender) WorldPlanner?.render?.(state);
     if (flush && user?.uid && WorldCloud.configured) {
       WorldCloud.flushSave(user.uid, WorldStore.packCloudPayload(state));
     }

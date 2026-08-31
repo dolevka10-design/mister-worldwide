@@ -256,22 +256,37 @@ window.WorldMapsImport = (() => {
     if (!q) return null;
     try {
       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, {
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", "User-Agent": "MisterWorldwide/1.0" },
       });
+      if (res.status === 429 || res.status === 503) {
+        const err = new Error("Geocoding rate limit reached — try again in a minute or use a Maps URL with coordinates.");
+        err.code = "GEOCODE_QUOTA";
+        throw err;
+      }
       const data = await res.json();
       if (!data?.[0]) return null;
       return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-    } catch {
+    } catch (e) {
+      if (e.code === "GEOCODE_QUOTA") throw e;
       return null;
     }
   }
 
   async function resolvePending(state, pending, onProgress) {
     const added = [];
+    let quotaHit = false;
     for (let i = 0; i < pending.length; i++) {
       const p = pending[i];
       onProgress?.(i + 1, pending.length, p.name);
-      const coords = await geocodePlace(p.name, p.city, p.countryName);
+      let coords = null;
+      try {
+        coords = await geocodePlace(p.name, p.city, p.countryName);
+      } catch (e) {
+        if (e.code === "GEOCODE_QUOTA") {
+          quotaHit = true;
+          break;
+        }
+      }
       await new Promise((r) => setTimeout(r, 1100));
       if (!coords) continue;
       const byUrl = buildUrlIndex(state);
@@ -289,6 +304,9 @@ window.WorldMapsImport = (() => {
         existingKeys,
       });
       if (r.status === "added") added.push(r.place);
+    }
+    if (quotaHit && !added.length) {
+      throw new Error("Geocoding limit reached. Open the link in Google Maps, copy a full maps.google.com URL with coordinates, or try again later.");
     }
     WorldStore.recategorizePlaces(state);
     return added;
@@ -357,28 +375,45 @@ window.WorldMapsImport = (() => {
     return /google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl/i.test(String(text || ""));
   }
 
-  async function expandMapsUrl(url) {
+  function normalizeImportText(text) {
+    return String(text || "")
+      .split(/\n/)
+      .map((line) => line.replace(/^\s*add\s+/i, "").trim())
+      .join("\n");
+  }
+
+  async function resolveMapsUrl(url) {
     const raw = String(url || "").trim();
-    if (!raw) return raw;
-    if (!/goo\.gl|maps\.app/i.test(raw)) return raw;
+    if (!raw) return { url: raw, lat: null, lng: null, name: null };
     try {
       const res = await fetch(`/.netlify/functions/resolve-maps?url=${encodeURIComponent(raw)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data?.url) return data.url;
+        return {
+          url: data.url || raw,
+          lat: Number.isFinite(data.lat) ? data.lat : null,
+          lng: Number.isFinite(data.lng) ? data.lng : null,
+          name: data.name || null,
+        };
       }
     } catch { /* fall through */ }
-    return raw;
+    return { url: raw, lat: null, lng: null, name: nameFromUrl(raw) || null };
+  }
+
+  async function expandMapsUrl(url) {
+    const r = await resolveMapsUrl(url);
+    return r.url;
   }
 
   async function importMapsUrls(state, text, { countryId, countryName, city } = {}) {
-    const lines = String(text || "").split(/\n/).map((s) => s.trim()).filter(Boolean);
+    const cleaned = normalizeImportText(text);
+    const lines = cleaned.split(/\n/).map((s) => s.trim()).filter(Boolean);
     const rawUrls = lines.filter((l) => isMapsUrl(l) || l.startsWith("http"));
     if (!rawUrls.length) throw new Error("Paste one or more Google Maps URLs");
 
-    const urls = [];
+    const resolved = [];
     for (const u of rawUrls) {
-      urls.push(await expandMapsUrl(u));
+      resolved.push(await resolveMapsUrl(u));
     }
 
     const byUrl = buildUrlIndex(state);
@@ -389,10 +424,16 @@ window.WorldMapsImport = (() => {
     const country = countryId ? state.countries.find((c) => c.id === countryId) : null;
     const defaultCountry = countryName || country?.name || "";
 
-    for (const url of urls) {
+    for (const item of resolved) {
+      const url = item.url;
       if (!isMapsUrl(url)) continue;
-      const name = nameFromUrl(url) || "Saved place";
-      const coords = parseCoordsFromUrl(url);
+      const name = item.name || nameFromUrl(url) || "Saved place";
+      let coords = null;
+      if (Number.isFinite(item.lat) && Number.isFinite(item.lng)) {
+        coords = { lat: item.lat, lng: item.lng };
+      } else {
+        coords = parseCoordsFromUrl(url);
+      }
       if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
         const r = addPlace(state, {
           name,
@@ -417,15 +458,25 @@ window.WorldMapsImport = (() => {
       const geocoded = await resolvePending(state, pending);
       added.push(...geocoded);
       WorldStore.recategorizePlaces(state);
-      return { added, skipped, geocoded: added.length - before, pending: pending.length - geocoded.length };
+      const failed = pending.length - geocoded.length;
+      if (!added.length && failed) {
+        throw new Error("Could not resolve coordinates from this link. Open it in Google Maps, share the full URL (with @lat,lng), or import via Takeout CSV.");
+      }
+      return { added, skipped, geocoded: added.length - before, pending: failed };
     }
 
     WorldStore.recategorizePlaces(state);
+    if (!added.length && skipped.length) {
+      throw new Error("Place already saved (duplicate URL).");
+    }
+    if (!added.length) {
+      throw new Error("Could not import — no coordinates found in URL. Try the full Google Maps link.");
+    }
     return { added, skipped, geocoded: 0, pending: 0 };
   }
 
   return {
-    parseCsv, importText, importTakeoutCsv, importTakeoutZip, importMapsUrls, expandMapsUrl,
+    parseCsv, importText, importTakeoutCsv, importTakeoutZip, importMapsUrls, expandMapsUrl, resolveMapsUrl,
     urlFingerprint, nameFromUrl, hintFromFilename, geocodePlace, parseCoordsFromUrl, isMapsUrl,
   };
 })();

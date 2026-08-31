@@ -453,7 +453,7 @@ window.WorldPlanner = (() => {
         `<option value="${esc(cc.id)}" ${cc.id === s.countryId ? "selected" : ""}>${esc(cc.name)}</option>`
       ).join("");
       const photo = segmentPhotoUrl(s, c);
-      return `<article class="segment-card card segment-editable" data-seg-id="${esc(s.id)}">
+      return `<article class="segment-card card segment-editable" id="seg-${esc(s.id)}" data-seg-id="${esc(s.id)}">
         <div class="segment-photo" style="background-image:url('${photo}')">
           <div class="segment-photo-overlay">
             ${c ? `<img class="segment-flag" src="${CountryMeta.flagUrl(c.iso, 24)}" alt="" width="28" height="20"/>` : ""}
@@ -473,6 +473,7 @@ window.WorldPlanner = (() => {
           <input class="seg-edit-city pill-select" data-seg="${esc(s.id)}" value="${esc(s.city)}" placeholder="City" />
           <input class="seg-edit-start pill-select" data-seg="${esc(s.id)}" type="date" value="${esc(s.startDate || "")}" />
           <input class="seg-edit-end pill-select" data-seg="${esc(s.id)}" type="date" value="${esc(s.endDate || "")}" />
+          <button type="button" class="btn btn-secondary btn-sm seg-apply" data-seg-apply="${esc(s.id)}">Update segment</button>
         </div>
       </article>`;
     }).join("");
@@ -601,7 +602,7 @@ window.WorldPlanner = (() => {
         <label class="field"><span class="muted">Trip start</span><input id="planner-start" type="date" class="pill-select" value="${esc(trip?.startDate || "")}" /></label>
         <label class="field"><span class="muted">Trip end</span><input id="planner-end" type="date" class="pill-select" value="${esc(trip?.endDate || "")}" /></label>
       </div>
-      <section class="planner-section">
+      <section class="planner-section" id="planner-route">
         <h3>Route — countries &amp; cities</h3>
         <div class="segment-grid">${renderEditableSegments(state, trip) || '<p class="muted">No segments</p>'}</div>
       </section>
@@ -615,7 +616,7 @@ window.WorldPlanner = (() => {
           <button type="button" class="btn btn-secondary btn-sm" id="seg-save">Add segment</button>
         </div>
       </details>
-      <section class="planner-section">
+      <section class="planner-section" id="planner-days">
         <h3>Days</h3>
         <div class="day-list">${renderDayList(trip, dayNum)}</div>
       </section>
@@ -625,11 +626,11 @@ window.WorldPlanner = (() => {
         <button type="button" class="btn btn-primary btn-sm" id="planner-suggest-ai">AI suggest</button>
       </div>
       <section class="planner-section"><h3>Suggestions</h3><ul class="planner-suggestions">${sugHtml || '<li class="muted">Tap Quick suggest or AI suggest</li>'}</ul></section>
-      <section class="planner-section"><h3>Day ${dayNum} places</h3>${renderDayItinerary(day)}</section>
+      <section class="planner-section" id="planner-day-places"><h3>Day ${dayNum} places</h3>${renderDayItinerary(day)}</section>
       ${renderPlacePicker(state, trip, dayNum)}
       <footer class="planner-footer">
         <button type="button" class="btn btn-secondary btn-sm" id="planner-export">Export Excel</button>
-        <button type="button" class="btn btn-primary" id="planner-save">Save trip</button>
+        <button type="button" class="btn btn-primary" id="planner-save">Save &amp; close</button>
       </footer>
       <input type="hidden" id="planner-day" value="${dayNum}" />`;
   }
@@ -649,16 +650,31 @@ window.WorldPlanner = (() => {
       <div class="planner-body">${trip ? renderPlan(state, trip, dayNum) : renderCreateForm(state)}</div>`;
 
     bindPanel(state, dayNum);
+    return state;
   }
 
-  function savePlanner({ flush, close } = {}) {
-    WorldApp.persistPlanner({ flush });
-    if (close) {
-      WorldApp.toast(flush ? "Trip saved — syncing to cloud" : "Trip saved");
-      toggle(false);
-      return;
-    }
-    WorldApp.toast(flush ? "Trip saved — syncing to cloud" : "Trip saved");
+  function refreshPlannerUI({ scroll, close, toast: toastMsg } = {}) {
+    render(WorldApp.getState());
+    requestAnimationFrame(() => {
+      const body = document.querySelector(".planner-body");
+      if (scroll && body) {
+        const el = typeof scroll === "string" ? document.querySelector(scroll) : scroll;
+        if (el) {
+          const top = el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 8;
+          body.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        }
+      } else if (body) {
+        body.scrollTop = 0;
+      }
+      if (close) toggle(false);
+    });
+    if (toastMsg) WorldApp.toast(toastMsg);
+  }
+
+  function savePlanner({ flush, close, scroll, toast: toastMsg } = {}) {
+    WorldApp.persistPlanner({ flush, skipPlannerRender: true });
+    const msg = toastMsg || (flush ? "Trip saved — syncing to cloud" : "Trip saved");
+    refreshPlannerUI({ scroll: close ? null : (scroll || "#planner-route"), close, toast: msg });
   }
 
   function bindSegmentEdits(state, trip) {
@@ -669,31 +685,30 @@ window.WorldPlanner = (() => {
         startDate: document.querySelector(`.seg-edit-start[data-seg="${segId}"]`)?.value || null,
         endDate: document.querySelector(`.seg-edit-end[data-seg="${segId}"]`)?.value || null,
       });
-      savePlanner();
-      render(state);
+      savePlanner({ scroll: `#seg-${segId}`, toast: "Segment updated" });
     };
+    document.querySelectorAll("[data-seg-apply]").forEach((btn) => {
+      btn.addEventListener("click", () => applySeg(btn.dataset.segApply));
+    });
     document.querySelectorAll(".seg-edit-country, .seg-edit-city, .seg-edit-start, .seg-edit-end").forEach((el) => {
       el.addEventListener("change", () => applySeg(el.dataset.seg));
     });
     document.querySelectorAll("[data-seg-up]").forEach((btn) => {
       btn.addEventListener("click", () => {
         moveSegment(trip, btn.dataset.segUp, -1);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-route", toast: "Route updated" });
       });
     });
     document.querySelectorAll("[data-seg-down]").forEach((btn) => {
       btn.addEventListener("click", () => {
         moveSegment(trip, btn.dataset.segDown, 1);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-route", toast: "Route updated" });
       });
     });
     document.querySelectorAll("[data-seg-remove]").forEach((btn) => {
       btn.addEventListener("click", () => {
         if (!removeSegment(trip, btn.dataset.segRemove)) return WorldApp.toast("Need at least one segment", "warn");
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-route", toast: "Segment removed" });
       });
     });
   }
@@ -712,8 +727,7 @@ window.WorldPlanner = (() => {
 
     $("planner-trip")?.addEventListener("change", (e) => {
       setActiveTrip(state, e.target.value);
-      savePlanner();
-      render(state);
+      savePlanner({ scroll: "#planner-route", toast: "Trip switched" });
     });
 
     $("new-trip-add-country")?.addEventListener("click", () => {
@@ -734,8 +748,7 @@ window.WorldPlanner = (() => {
         if (!s.startDate || !s.endDate) return WorldApp.toast("Each country needs start and end dates", "warn");
       }
       createTrip(state, { name, segments });
-      savePlanner({ flush: true });
-      render(state);
+      savePlanner({ flush: true, scroll: "#planner-route", toast: "Trip created" });
     });
 
     $("planner-new-trip")?.addEventListener("click", () => {
@@ -750,8 +763,7 @@ window.WorldPlanner = (() => {
       trip.startDate = $("planner-start").value;
       if (trip.segments[0]) trip.segments[0].startDate = trip.startDate;
       rebuildDays(trip);
-      savePlanner();
-      render(state);
+      savePlanner({ scroll: "#planner-days", toast: "Dates updated" });
     });
 
     $("planner-end")?.addEventListener("change", () => {
@@ -759,30 +771,27 @@ window.WorldPlanner = (() => {
       const last = trip.segments[trip.segments.length - 1];
       if (last) last.endDate = trip.endDate;
       rebuildDays(trip);
-      savePlanner();
-      render(state);
+      savePlanner({ scroll: "#planner-days", toast: "Dates updated" });
     });
 
     document.querySelectorAll("[data-day]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const hidden = $("planner-day");
         if (hidden) hidden.value = btn.dataset.day;
-        render(state);
+        refreshPlannerUI({ scroll: "#planner-day-places" });
       });
     });
 
     document.querySelectorAll("[data-day-up]").forEach((btn) => {
       btn.addEventListener("click", () => {
         moveDay(trip, Number(btn.dataset.dayUp), -1);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-days", toast: "Day order updated" });
       });
     });
     document.querySelectorAll("[data-day-down]").forEach((btn) => {
       btn.addEventListener("click", () => {
         moveDay(trip, Number(btn.dataset.dayDown), 1);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-days", toast: "Day order updated" });
       });
     });
     document.querySelectorAll("[data-day-remove]").forEach((btn) => {
@@ -791,39 +800,33 @@ window.WorldPlanner = (() => {
         if (!removeDay(trip, n)) return WorldApp.toast("Need at least one day", "warn");
         const hidden = $("planner-day");
         if (hidden && Number(hidden.value) > trip.dayCount) hidden.value = String(trip.dayCount);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-days", toast: "Day removed" });
       });
     });
 
     bindSegmentEdits(state, trip);
 
     $("seg-save")?.addEventListener("click", () => {
-      addSegment(state, trip.id, {
-        countryId: $("seg-country")?.value,
-        city: $("seg-city")?.value || "Other",
-        startDate: $("seg-start")?.value,
-        endDate: $("seg-end")?.value,
-      });
-      savePlanner();
-      render(state);
-      WorldApp.toast("Segment added");
+      const countryId = $("seg-country")?.value;
+      const city = $("seg-city")?.value || "Other";
+      const startDate = $("seg-start")?.value;
+      const endDate = $("seg-end")?.value;
+      if (!countryId) return WorldApp.toast("Pick a country", "warn");
+      addSegment(state, trip.id, { countryId, city, startDate, endDate });
+      savePlanner({ scroll: "#planner-route", toast: "Segment added" });
     });
 
     $("planner-suggest-local")?.addEventListener("click", () => {
       const d = Number($("planner-day")?.value) || dayNum || 1;
       localSuggestDay(state, trip, d);
-      savePlanner();
-      render(state);
-      WorldApp.toast("Suggestions ready");
+      savePlanner({ scroll: ".planner-suggestions", toast: "Suggestions ready" });
     });
 
     $("planner-suggest-ai")?.addEventListener("click", async () => {
       const d = Number($("planner-day")?.value) || dayNum || 1;
       WorldApp.toast("Getting suggestions…");
       await aiSuggestDay(state, trip, d, { hour: new Date().getHours() });
-      savePlanner();
-      render(state);
+      savePlanner({ scroll: ".planner-suggestions" });
     });
 
     document.querySelectorAll("[data-adopt-sug]").forEach((btn) => {
@@ -832,8 +835,7 @@ window.WorldPlanner = (() => {
         const sug = trip.suggestions?.find((s) => s.id === btn.dataset.adoptSug);
         if (!sug) return;
         adoptSuggestion(state, trip.id, sug, d);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-day-places", toast: "Added to day" });
       });
     });
 
@@ -841,8 +843,7 @@ window.WorldPlanner = (() => {
       btn.addEventListener("click", () => {
         const d = Number($("planner-day")?.value) || dayNum || 1;
         removeEntry(state, trip.id, d, btn.dataset.slot, btn.dataset.removeEntry);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-day-places" });
       });
     });
 
@@ -850,16 +851,14 @@ window.WorldPlanner = (() => {
       btn.addEventListener("click", () => {
         const d = Number($("planner-day")?.value) || dayNum || 1;
         moveEntry(state, trip.id, d, btn.dataset.entryUp, -1);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-day-places" });
       });
     });
     document.querySelectorAll("[data-entry-down]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const d = Number($("planner-day")?.value) || dayNum || 1;
         moveEntry(state, trip.id, d, btn.dataset.entryDown, 1);
-        savePlanner();
-        render(state);
+        savePlanner({ scroll: "#planner-day-places" });
       });
     });
 
@@ -870,9 +869,7 @@ window.WorldPlanner = (() => {
         if (!place) return;
         const slot = PlaceCategorize.defaultSlot(place.category);
         addPlace(state, trip.id, d, slot, place, "");
-        savePlanner();
-        render(state);
-        WorldApp.toast(`Added ${place.name}`);
+        savePlanner({ scroll: "#planner-day-places", toast: `Added ${place.name}` });
       });
     });
   }
