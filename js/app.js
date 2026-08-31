@@ -35,9 +35,12 @@ window.WorldApp = (() => {
     renderStats();
   }
 
-  function persistPlanner() {
+  function persistPlanner({ flush } = {}) {
     persist({ touchPlanner: true });
     WorldPlanner?.render?.(state);
+    if (flush && user?.uid && WorldCloud.configured) {
+      WorldCloud.flushSave(user.uid, WorldStore.packCloudPayload(state));
+    }
   }
 
   function getState() { return state; }
@@ -546,6 +549,7 @@ window.WorldApp = (() => {
 
   return {
     start, ready: () => ready, getState, setState, cloneState, persist, persistPlanner, refresh, toast,
+    getUser: () => user,
     selectCountry, get selectedCountry() { return selectedCountry; },
   };
 })();

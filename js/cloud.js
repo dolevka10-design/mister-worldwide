@@ -124,10 +124,19 @@ window.WorldCloud = (() => {
     return snap.exists ? snap.data() : null;
   }
 
+  function flushSave(uid, state) {
+    if (!db || !uid) return Promise.resolve();
+    clearTimeout(saveTimer);
+    return db.doc(docPath(uid)).set(
+      { ...state, savedAt: firebase.firestore.FieldValue.serverTimestamp() },
+      { merge: true }
+    ).catch((e) => { console.warn("Cloud save failed", e); });
+  }
+
   return {
     configured, initFirebase, isAllowedEmail,
     signIn, signUp, signInWithGoogle, signOut, onAuthStateChanged,
-    loadFromCloud, scheduleSave, listenCloud, isApplyingRemote,
+    loadFromCloud, scheduleSave, flushSave, listenCloud, isApplyingRemote,
     saveAssistantChat, loadAssistantChat,
   };
 })();

@@ -1,5 +1,5 @@
 /**
- * Travel planner — multi-city/country segments, dates, suggestions.
+ * Travel planner — multi-country trips, city segments, daily itinerary.
  */
 window.WorldPlanner = (() => {
   const SLOTS = [
@@ -18,9 +18,13 @@ window.WorldPlanner = (() => {
 
   const $ = (id) => document.getElementById(id);
   let open = false;
+  let pendingPlace = null;
 
   function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+  function slotOptions(selected) {
+    return SLOTS.map((s) => `<option value="${s.id}" ${s.id === selected ? "selected" : ""}>${s.label}</option>`).join("");
+  }
 
   function ensurePlanner(state) {
     if (!state.planner) state.planner = { trips: [], activeTripId: null };
@@ -53,6 +57,14 @@ window.WorldPlanner = (() => {
     return { day: dayNum, date: date || null, segmentId: segmentId || null, slots: {}, notes: "" };
   }
 
+  function syncTripBounds(trip) {
+    const segs = trip.segments || [];
+    const starts = segs.map((s) => s.startDate).filter(Boolean).sort();
+    const ends = segs.map((s) => s.endDate).filter(Boolean).sort();
+    if (starts.length) trip.startDate = starts[0];
+    if (ends.length) trip.endDate = ends[ends.length - 1];
+  }
+
   function migrateTrip(trip) {
     if (!trip) return trip;
     if (!trip.segments?.length) {
@@ -79,40 +91,76 @@ window.WorldPlanner = (() => {
   }
 
   function rebuildDays(trip) {
-    const start = trip.startDate || trip.segments[0]?.startDate;
-    let dayCount = trip.dayCount;
-    if (start && trip.endDate) dayCount = daysBetween(start, trip.endDate) + 1;
-    else if (trip.segments.length) {
-      dayCount = trip.segments.reduce((sum, s) => {
-        if (s.startDate && s.endDate) return sum + daysBetween(s.startDate, s.endDate) + 1;
-        return sum + 1;
-      }, 0) || trip.dayCount || 3;
+    syncTripBounds(trip);
+    const prevByDate = new Map();
+    for (const d of trip.days || []) {
+      if (d.date) prevByDate.set(d.date, d);
     }
-    trip.dayCount = Math.max(1, dayCount || 3);
-    const prev = trip.days || [];
-    trip.days = [];
-    for (let i = 1; i <= trip.dayCount; i++) {
-      const date = start ? addDays(start, i - 1) : prev[i - 1]?.date || null;
-      const seg = trip.segments.find((s) => date && s.startDate && s.endDate && date >= s.startDate && date <= s.endDate)
-        || trip.segments[Math.min(trip.segments.length - 1, Math.floor(((i - 1) / trip.dayCount) * trip.segments.length))];
-      const old = prev[i - 1];
-      trip.days.push({ ...emptyDay(i, date, seg?.id), slots: old?.slots || {}, notes: old?.notes || "" });
+
+    const days = [];
+    let dayNum = 1;
+    for (const seg of trip.segments || []) {
+      if (seg.startDate && seg.endDate) {
+        const count = daysBetween(seg.startDate, seg.endDate) + 1;
+        for (let i = 0; i < count; i++) {
+          const date = addDays(seg.startDate, i);
+          const old = prevByDate.get(date) || trip.days?.[dayNum - 1];
+          days.push({
+            ...emptyDay(dayNum, date, seg.id),
+            slots: old?.slots ? JSON.parse(JSON.stringify(old.slots)) : {},
+            notes: old?.notes || "",
+          });
+          dayNum++;
+        }
+      } else {
+        const old = trip.days?.[dayNum - 1];
+        days.push({
+          ...emptyDay(dayNum, null, seg.id),
+          slots: old?.slots ? JSON.parse(JSON.stringify(old.slots)) : {},
+          notes: old?.notes || "",
+        });
+        dayNum++;
+      }
     }
+
+    if (!days.length) {
+      const n = Math.max(1, trip.dayCount || 3);
+      const start = trip.startDate;
+      for (let i = 1; i <= n; i++) {
+        const date = start ? addDays(start, i - 1) : null;
+        const old = trip.days?.[i - 1];
+        days.push({
+          ...emptyDay(i, date, trip.segments?.[0]?.id),
+          slots: old?.slots ? JSON.parse(JSON.stringify(old.slots)) : {},
+          notes: old?.notes || "",
+        });
+      }
+    }
+
+    trip.days = days;
+    trip.dayCount = days.length;
     return trip;
   }
 
   function createTrip(state, { name, startDate, endDate, segments, dayCount }) {
     const planner = ensurePlanner(state);
     const segs = (segments || []).map((s) => ({
-      id: WorldStore.uid("seg"), countryId: s.countryId, city: s.city || "Other",
-      startDate: s.startDate || null, endDate: s.endDate || null,
+      id: WorldStore.uid("seg"),
+      countryId: s.countryId,
+      city: s.city || "Other",
+      startDate: s.startDate || null,
+      endDate: s.endDate || null,
     }));
     if (!segs.length) segs.push({ id: WorldStore.uid("seg"), countryId: "", city: "Other", startDate, endDate });
     const trip = migrateTrip({
-      id: WorldStore.uid("trip"), name: name || "My trip",
+      id: WorldStore.uid("trip"),
+      name: name || "My trip",
       startDate: startDate || segs[0]?.startDate || null,
       endDate: endDate || segs[segs.length - 1]?.endDate || null,
-      segments: segs, dayCount: dayCount || 3, days: [], suggestions: [],
+      segments: segs,
+      dayCount: dayCount || 3,
+      days: [],
+      suggestions: [],
       createdAt: new Date().toISOString(),
     });
     rebuildDays(trip);
@@ -128,10 +176,11 @@ window.WorldPlanner = (() => {
 
   function setActiveTrip(state, tripId) { ensurePlanner(state).activeTripId = tripId; }
 
-  function placesForDay(state, trip, dayNum) {
+  function placesForDay(state, trip, dayNum, { city } = {}) {
     const seg = segmentForDay(trip, dayNum);
     if (!seg?.countryId) return [];
-    return WorldStore.placesByCountry(state, seg.countryId, { city: seg.city === "Other" ? undefined : seg.city });
+    const cityFilter = city || (seg.city === "Other" ? undefined : seg.city);
+    return WorldStore.placesByCountry(state, seg.countryId, { city: cityFilter });
   }
 
   function entryFromPlace(place, slot, note = "") {
@@ -163,12 +212,87 @@ window.WorldPlanner = (() => {
     return true;
   }
 
+  function flatDayEntries(day) {
+    const out = [];
+    for (const slot of SLOTS) {
+      for (const e of day.slots?.[slot.id] || []) out.push({ slot: slot.id, entry: e });
+    }
+    return out;
+  }
+
+  function applyFlatDayEntries(day, flat) {
+    day.slots = {};
+    for (const { slot, entry } of flat) {
+      if (!day.slots[slot]) day.slots[slot] = [];
+      day.slots[slot].push(entry);
+    }
+  }
+
+  function moveEntry(state, tripId, dayNum, entryId, dir) {
+    const trip = ensurePlanner(state).trips.find((t) => t.id === tripId);
+    const day = trip?.days?.[dayNum - 1];
+    if (!day) return false;
+    const flat = flatDayEntries(day);
+    const idx = flat.findIndex((x) => x.entry.id === entryId);
+    if (idx < 0) return false;
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= flat.length) return false;
+    [flat[idx], flat[newIdx]] = [flat[newIdx], flat[idx]];
+    applyFlatDayEntries(day, flat);
+    return true;
+  }
+
+  function moveDay(trip, dayNum, dir) {
+    const idx = dayNum - 1;
+    const newIdx = idx + dir;
+    if (!trip.days || newIdx < 0 || newIdx >= trip.days.length) return false;
+    [trip.days[idx], trip.days[newIdx]] = [trip.days[newIdx], trip.days[idx]];
+    trip.days.forEach((d, i) => { d.day = i + 1; });
+    trip.dayCount = trip.days.length;
+    return true;
+  }
+
+  function removeDay(trip, dayNum) {
+    if (!trip.days || trip.days.length <= 1) return false;
+    trip.days.splice(dayNum - 1, 1);
+    trip.days.forEach((d, i) => { d.day = i + 1; });
+    trip.dayCount = trip.days.length;
+    return true;
+  }
+
+  function updateSegment(trip, segId, patch) {
+    const seg = trip.segments.find((s) => s.id === segId);
+    if (!seg) return false;
+    Object.assign(seg, patch);
+    syncTripBounds(trip);
+    rebuildDays(trip);
+    return true;
+  }
+
+  function removeSegment(trip, segId) {
+    if (!trip.segments || trip.segments.length <= 1) return false;
+    trip.segments = trip.segments.filter((s) => s.id !== segId);
+    syncTripBounds(trip);
+    rebuildDays(trip);
+    return true;
+  }
+
+  function moveSegment(trip, segId, dir) {
+    const idx = trip.segments.findIndex((s) => s.id === segId);
+    if (idx < 0) return false;
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= trip.segments.length) return false;
+    [trip.segments[idx], trip.segments[newIdx]] = [trip.segments[newIdx], trip.segments[idx]];
+    syncTripBounds(trip);
+    rebuildDays(trip);
+    return true;
+  }
+
   function addSegment(state, tripId, { countryId, city, startDate, endDate }) {
     const trip = ensurePlanner(state).trips.find((t) => t.id === tripId);
     if (!trip) return null;
     trip.segments.push({ id: WorldStore.uid("seg"), countryId, city: city || "Other", startDate, endDate });
-    if (startDate && (!trip.startDate || startDate < trip.startDate)) trip.startDate = startDate;
-    if (endDate && (!trip.endDate || endDate > trip.endDate)) trip.endDate = endDate;
+    syncTripBounds(trip);
     rebuildDays(trip);
     return trip;
   }
@@ -263,33 +387,128 @@ window.WorldPlanner = (() => {
     return true;
   }
 
-  function segmentSummary(trip) {
-    return (trip.segments || []).map((s) => {
-      const dates = s.startDate && s.endDate ? ` ${s.startDate}→${s.endDate}` : "";
-      return `${s.city}${dates}`;
-    }).join(" · ");
-  }
-
   function countDayItems(day) {
     let n = 0;
     for (const items of Object.values(day?.slots || {})) n += (items || []).length;
     return n;
   }
 
-  function renderCreateForm(state, countryOpts) {
+  function countryRowHtml(countries, idx, row = {}) {
+    const opts = countries.map((c) =>
+      `<option value="${esc(c.id)}" ${c.id === row.countryId ? "selected" : ""}>${esc(c.name)}</option>`
+    ).join("");
+    return `
+      <div class="trip-country-row" data-row="${idx}">
+        <select class="new-seg-country pill-select">${opts}</select>
+        <input class="new-seg-city pill-select" placeholder="City" value="${esc(row.city || "")}" />
+        <input class="new-seg-start pill-select" type="date" value="${esc(row.startDate || "")}" aria-label="Start" />
+        <input class="new-seg-end pill-select" type="date" value="${esc(row.endDate || "")}" aria-label="End" />
+        <button type="button" class="btn btn-ghost btn-sm row-remove" title="Remove">✕</button>
+      </div>`;
+  }
+
+  function renderCreateForm(state) {
+    const countries = WorldStore.countriesForUi(state);
     return `
       <div class="planner-empty card">
         <h3>Start a new trip</h3>
-        <p class="muted">Multi-city &amp; multi-country — add segments with date ranges.</p>
-        <div class="planner-grid">
-          <input id="new-trip-name" class="pill-select" placeholder="Trip name" />
-          <select id="new-trip-country" class="pill-select">${countryOpts}</select>
-          <input id="new-trip-city" class="pill-select" placeholder="First city" />
-          <input id="new-trip-start" type="date" class="pill-select" aria-label="Start date" />
-          <input id="new-trip-end" type="date" class="pill-select" aria-label="End date" />
+        <p class="muted">Add countries with date ranges — they become one connected trip.</p>
+        <input id="new-trip-name" class="pill-select" placeholder="Trip name" style="margin-bottom:0.5rem;width:100%" />
+        <div id="new-trip-rows" class="trip-country-rows">${countryRowHtml(countries, 0)}</div>
+        <div class="planner-actions" style="margin-top:0.5rem">
+          <button type="button" class="btn btn-ghost btn-sm" id="new-trip-add-country">+ Country</button>
           <button type="button" class="btn btn-primary" id="new-trip-create">Create trip</button>
         </div>
       </div>`;
+  }
+
+  function collectCreateRows() {
+    const rows = [];
+    document.querySelectorAll(".trip-country-row").forEach((el) => {
+      const countryId = el.querySelector(".new-seg-country")?.value;
+      const city = el.querySelector(".new-seg-city")?.value?.trim() || "Other";
+      const startDate = el.querySelector(".new-seg-start")?.value || null;
+      const endDate = el.querySelector(".new-seg-end")?.value || null;
+      if (countryId) rows.push({ countryId, city, startDate, endDate });
+    });
+    return rows;
+  }
+
+  function renderEditableSegments(state, trip) {
+    const countries = WorldStore.countriesForUi(state);
+    return (trip.segments || []).map((s, i) => {
+      const c = state.countries.find((x) => x.id === s.countryId);
+      const opts = countries.map((cc) =>
+        `<option value="${esc(cc.id)}" ${cc.id === s.countryId ? "selected" : ""}>${esc(cc.name)}</option>`
+      ).join("");
+      return `<article class="segment-card card segment-editable" data-seg-id="${esc(s.id)}">
+        <div class="segment-card-head">
+          ${c ? `<img src="${CountryMeta.flagUrl(c.iso, 24)}" alt="" width="28" height="20"/>` : ""}
+          <strong>Stop ${i + 1}</strong>
+          <div class="segment-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-seg-up="${esc(s.id)}" ${i === 0 ? "disabled" : ""}>↑</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-seg-down="${esc(s.id)}" ${i === trip.segments.length - 1 ? "disabled" : ""}>↓</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-seg-remove="${esc(s.id)}" title="Remove segment">✕</button>
+          </div>
+        </div>
+        <div class="segment-edit-grid">
+          <select class="seg-edit-country pill-select" data-seg="${esc(s.id)}">${opts}</select>
+          <input class="seg-edit-city pill-select" data-seg="${esc(s.id)}" value="${esc(s.city)}" placeholder="City" />
+          <input class="seg-edit-start pill-select" data-seg="${esc(s.id)}" type="date" value="${esc(s.startDate || "")}" />
+          <input class="seg-edit-end pill-select" data-seg="${esc(s.id)}" type="date" value="${esc(s.endDate || "")}" />
+        </div>
+      </article>`;
+    }).join("");
+  }
+
+  function renderDayList(trip, dayNum) {
+    return (trip.days || []).map((d, i) => {
+      const n = i + 1;
+      const seg = trip.segments.find((s) => s.id === d.segmentId) || segmentForDay(trip, n);
+      const items = countDayItems(d);
+      return `<div class="day-row ${dayNum === n ? "active" : ""}" data-day-row="${n}">
+        <button type="button" class="day-chip ${dayNum === n ? "active" : ""}" data-day="${n}">
+          Day ${n}${d.date ? `<small>${d.date.slice(5)}</small>` : ""}${items ? `<span class="day-count">${items}</span>` : ""}
+        </button>
+        <span class="day-row-meta muted">${esc(seg?.city || "")}</span>
+        <div class="day-row-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-day-up="${n}" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-day-down="${n}" ${i === trip.days.length - 1 ? "disabled" : ""}>↓</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-day-remove="${n}" title="Remove day">✕</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  function renderDayItinerary(day) {
+    const flat = flatDayEntries(day);
+    if (!flat.length) return '<p class="muted card planner-empty">Empty — add from saved places below or + Trip on a place</p>';
+    return `<ul class="planner-items planner-day-order">${flat.map(({ slot, entry }) => `
+      <li class="planner-item">
+        <div class="planner-item-order">
+          <button type="button" class="btn btn-ghost btn-sm" data-entry-up="${esc(entry.id)}">↑</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-entry-down="${esc(entry.id)}">↓</button>
+        </div>
+        <div class="planner-item-body">
+          <strong>${esc(entry.name)}</strong>
+          <span class="muted place-meta">${esc(slotLabel(slot))} · ${esc(PlaceCategorize.label(entry.category))}${entry.note ? ` · ${esc(entry.note)}` : ""}</span>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" data-remove-entry="${esc(entry.id)}" data-slot="${esc(slot)}">✕</button>
+      </li>`).join("")}</ul>`;
+  }
+
+  function renderPlacePicker(state, trip, dayNum) {
+    const seg = segmentForDay(trip, dayNum);
+    const places = placesForDay(state, trip, dayNum).slice(0, 24);
+    if (!places.length) return "";
+    const country = state.countries.find((c) => c.id === seg?.countryId);
+    return `
+      <section class="planner-section">
+        <h3>Add from ${esc(country?.name || "country")} · ${esc(seg?.city || "")}</h3>
+        <ul class="planner-pick-list">${places.map((p) => `
+          <li><button type="button" class="btn btn-ghost btn-sm pick-place-btn" data-pick-place="${esc(p.id)}">+ ${esc(p.name)} <span class="muted">${esc(p.city)}</span></button></li>
+        `).join("")}</ul>
+      </section>`;
   }
 
   function renderPlan(state, trip, dayNum) {
@@ -298,39 +517,6 @@ window.WorldPlanner = (() => {
     const country = state.countries.find((c) => c.id === seg?.countryId);
     const countries = WorldStore.countriesForUi(state);
     const countryOpts = countries.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
-
-    const dayChips = Array.from({ length: trip?.dayCount || 1 }, (_, i) => {
-      const d = trip?.days?.[i];
-      const n = i + 1;
-      const items = countDayItems(d);
-      return `<button type="button" class="day-chip ${dayNum === n ? "active" : ""}" data-day="${n}">Day ${n}${d?.date ? `<small>${d.date.slice(5)}</small>` : ""}${items ? `<span class="day-count">${items}</span>` : ""}</button>`;
-    }).join("");
-
-    const segCards = (trip?.segments || []).map((s) => {
-      const c = state.countries.find((x) => x.id === s.countryId);
-      return `<article class="segment-card card">
-        <div class="segment-card-head">
-          ${c ? `<img src="${CountryMeta.flagUrl(c.iso, 24)}" alt="" width="28" height="20"/>` : ""}
-          <div><strong>${esc(s.city)}</strong><span class="muted place-meta">${esc(c?.name || "Country")}</span></div>
-        </div>
-        <p class="muted segment-dates">${esc(s.startDate || "—")} → ${esc(s.endDate || "—")}</p>
-      </article>`;
-    }).join("");
-
-    let planHtml = "";
-    if (day) {
-      for (const slot of SLOTS) {
-        const items = day.slots?.[slot.id] || [];
-        if (!items.length) continue;
-        planHtml += `<article class="slot-card card"><header class="slot-card-head"><span>${slot.icon}</span><h4>${esc(slot.label)}</h4></header><ul class="planner-items">`;
-        planHtml += items.map((e) => `
-          <li class="planner-item">
-            <div><strong>${esc(e.name)}</strong><span class="muted place-meta">${esc(PlaceCategorize.label(e.category))}${e.note ? ` · ${esc(e.note)}` : ""}</span></div>
-            <button type="button" class="btn btn-ghost btn-sm" data-remove-entry="${esc(e.id)}" data-slot="${esc(slot.id)}">✕</button>
-          </li>`).join("");
-        planHtml += `</ul></article>`;
-      }
-    }
 
     const sugHtml = (trip?.suggestions || []).map((s) => `
       <li class="planner-suggestion card">
@@ -346,21 +532,19 @@ window.WorldPlanner = (() => {
             `<option value="${esc(t.id)}" ${t.id === ensurePlanner(state).activeTripId ? "selected" : ""}>${esc(t.name)}</option>`
           ).join("")}</select>
           <button type="button" class="btn btn-ghost btn-sm" id="planner-new-trip">+ New</button>
+          <button type="button" class="btn btn-primary btn-sm" id="planner-save">Save trip</button>
         </div>
       </div>
       <div class="planner-dates planner-grid">
-        <input id="planner-start" type="date" class="pill-select" value="${esc(trip?.startDate || "")}" aria-label="Trip start" />
-        <input id="planner-end" type="date" class="pill-select" value="${esc(trip?.endDate || "")}" aria-label="Trip end" />
+        <label class="field"><span class="muted">Trip start</span><input id="planner-start" type="date" class="pill-select" value="${esc(trip?.startDate || "")}" /></label>
+        <label class="field"><span class="muted">Trip end</span><input id="planner-end" type="date" class="pill-select" value="${esc(trip?.endDate || "")}" /></label>
       </div>
-      <div class="day-chip-row">${dayChips}</div>
-      ${seg ? `<p class="day-context card">📍 Day ${dayNum}: <strong>${esc(seg.city)}</strong>, ${esc(country?.name || "")}${day?.date ? ` · ${day.date}` : ""}</p>` : ""}
-      <div class="planner-actions">
-        <button type="button" class="btn btn-secondary btn-sm" id="planner-suggest-local">Quick suggest</button>
-        <button type="button" class="btn btn-primary btn-sm" id="planner-suggest-ai">AI suggest</button>
-      </div>
-      <section class="planner-section"><h3>Route</h3><div class="segment-grid">${segCards || '<p class="muted">No segments yet</p>'}</div></section>
+      <section class="planner-section">
+        <h3>Route — countries &amp; cities</h3>
+        <div class="segment-grid">${renderEditableSegments(state, trip) || '<p class="muted">No segments</p>'}</div>
+      </section>
       <details class="planner-add-seg-form card">
-        <summary>Add city / country segment</summary>
+        <summary>Add city segment</summary>
         <div class="planner-grid" style="margin-top:0.65rem">
           <select id="seg-country" class="pill-select">${countryOpts}</select>
           <input id="seg-city" class="pill-select" placeholder="City" />
@@ -369,8 +553,18 @@ window.WorldPlanner = (() => {
           <button type="button" class="btn btn-secondary btn-sm" id="seg-save">Add segment</button>
         </div>
       </details>
+      <section class="planner-section">
+        <h3>Days</h3>
+        <div class="day-list">${renderDayList(trip, dayNum)}</div>
+      </section>
+      ${seg ? `<p class="day-context card">📍 Day ${dayNum}: <strong>${esc(seg.city)}</strong>, ${esc(country?.name || "")}${day?.date ? ` · ${day.date}` : ""}</p>` : ""}
+      <div class="planner-actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="planner-suggest-local">Quick suggest</button>
+        <button type="button" class="btn btn-primary btn-sm" id="planner-suggest-ai">AI suggest</button>
+      </div>
       <section class="planner-section"><h3>Suggestions</h3><ul class="planner-suggestions">${sugHtml || '<li class="muted">Tap Quick suggest or AI suggest</li>'}</ul></section>
-      <section class="planner-section"><h3>Day ${dayNum} itinerary</h3><div class="slot-grid">${planHtml || '<p class="muted card planner-empty">Empty — add from suggestions or + Trip on a place</p>'}</div></section>
+      <section class="planner-section"><h3>Day ${dayNum} places</h3>${renderDayItinerary(day)}</section>
+      ${renderPlacePicker(state, trip, dayNum)}
       <input type="hidden" id="planner-day" value="${dayNum}" />`;
   }
 
@@ -380,42 +574,89 @@ window.WorldPlanner = (() => {
     if (!panel) return;
     const trip = getActiveTrip(state);
     const dayNum = Number($("planner-day")?.value) || 1;
-    const countries = WorldStore.countriesForUi(state);
-    const countryOpts = countries.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
 
     panel.innerHTML = `
       <header class="planner-head">
-        <div><strong>Travel Planner</strong><p class="muted assist-sub">Multi-city · multi-country · dated itinerary</p></div>
+        <div><strong>Travel Planner</strong><p class="muted assist-sub">Countries · cities · daily itinerary</p></div>
         <button type="button" class="btn btn-ghost btn-sm" id="planner-close">✕</button>
       </header>
-      <div class="planner-body">${trip ? renderPlan(state, trip, dayNum) : renderCreateForm(state, countryOpts)}</div>`;
+      <div class="planner-body">${trip ? renderPlan(state, trip, dayNum) : renderCreateForm(state)}</div>`;
 
     bindPanel(state, dayNum);
+  }
+
+  function savePlanner({ flush } = {}) {
+    WorldApp.persistPlanner({ flush });
+    WorldApp.toast(flush ? "Trip saved — syncing to cloud" : "Trip saved");
+  }
+
+  function bindSegmentEdits(state, trip) {
+    const applySeg = (segId) => {
+      updateSegment(trip, segId, {
+        countryId: document.querySelector(`.seg-edit-country[data-seg="${segId}"]`)?.value,
+        city: document.querySelector(`.seg-edit-city[data-seg="${segId}"]`)?.value || "Other",
+        startDate: document.querySelector(`.seg-edit-start[data-seg="${segId}"]`)?.value || null,
+        endDate: document.querySelector(`.seg-edit-end[data-seg="${segId}"]`)?.value || null,
+      });
+      savePlanner();
+      render(state);
+    };
+    document.querySelectorAll(".seg-edit-country, .seg-edit-city, .seg-edit-start, .seg-edit-end").forEach((el) => {
+      el.addEventListener("change", () => applySeg(el.dataset.seg));
+    });
+    document.querySelectorAll("[data-seg-up]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        moveSegment(trip, btn.dataset.segUp, -1);
+        savePlanner();
+        render(state);
+      });
+    });
+    document.querySelectorAll("[data-seg-down]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        moveSegment(trip, btn.dataset.segDown, 1);
+        savePlanner();
+        render(state);
+      });
+    });
+    document.querySelectorAll("[data-seg-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!removeSegment(trip, btn.dataset.segRemove)) return WorldApp.toast("Need at least one segment", "warn");
+        savePlanner();
+        render(state);
+      });
+    });
   }
 
   function bindPanel(state, dayNum) {
     $("planner-close")?.addEventListener("click", () => toggle(false));
 
+    $("planner-save")?.addEventListener("click", () => savePlanner({ flush: true }));
+
     $("planner-trip")?.addEventListener("change", (e) => {
       setActiveTrip(state, e.target.value);
-      WorldApp.persistPlanner();
+      savePlanner();
       render(state);
     });
 
+    $("new-trip-add-country")?.addEventListener("click", () => {
+      const rows = $("new-trip-rows");
+      const countries = WorldStore.countriesForUi(state);
+      const idx = rows?.querySelectorAll(".trip-country-row").length || 0;
+      rows?.insertAdjacentHTML("beforeend", countryRowHtml(countries, idx));
+      bindCreateRows(state);
+    });
+
+    bindCreateRows(state);
+
     $("new-trip-create")?.addEventListener("click", () => {
-      const countryId = $("new-trip-country")?.value;
-      const city = $("new-trip-city")?.value || "Other";
-      const startDate = $("new-trip-start")?.value;
-      const endDate = $("new-trip-end")?.value;
-      const name = $("new-trip-name")?.value || `${city} trip`;
-      if (!countryId) return WorldApp.toast("Pick a country", "warn");
-      createTrip(state, {
-        name, startDate, endDate,
-        segments: [{ countryId, city, startDate, endDate }],
-        dayCount: startDate && endDate ? daysBetween(startDate, endDate) + 1 : 3,
-      });
-      WorldApp.persistPlanner();
-      WorldApp.refresh();
+      const segments = collectCreateRows();
+      const name = $("new-trip-name")?.value?.trim() || "My trip";
+      if (!segments.length) return WorldApp.toast("Add at least one country with dates", "warn");
+      for (const s of segments) {
+        if (!s.startDate || !s.endDate) return WorldApp.toast("Each country needs start and end dates", "warn");
+      }
+      createTrip(state, { name, segments });
+      savePlanner({ flush: true });
       render(state);
     });
 
@@ -424,25 +665,27 @@ window.WorldPlanner = (() => {
       render(state);
     });
 
+    const trip = getActiveTrip(state);
+    if (!trip) return;
+
     $("planner-start")?.addEventListener("change", () => {
-      const trip = getActiveTrip(state);
-      if (!trip) return;
       trip.startDate = $("planner-start").value;
+      if (trip.segments[0]) trip.segments[0].startDate = trip.startDate;
       rebuildDays(trip);
-      WorldApp.persistPlanner();
+      savePlanner();
       render(state);
     });
 
     $("planner-end")?.addEventListener("change", () => {
-      const trip = getActiveTrip(state);
-      if (!trip) return;
       trip.endDate = $("planner-end").value;
+      const last = trip.segments[trip.segments.length - 1];
+      if (last) last.endDate = trip.endDate;
       rebuildDays(trip);
-      WorldApp.persistPlanner();
+      savePlanner();
       render(state);
     });
 
-    document.querySelectorAll(".day-chip").forEach((btn) => {
+    document.querySelectorAll("[data-day]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const hidden = $("planner-day");
         if (hidden) hidden.value = btn.dataset.day;
@@ -450,61 +693,208 @@ window.WorldPlanner = (() => {
       });
     });
 
+    document.querySelectorAll("[data-day-up]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        moveDay(trip, Number(btn.dataset.dayUp), -1);
+        savePlanner();
+        render(state);
+      });
+    });
+    document.querySelectorAll("[data-day-down]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        moveDay(trip, Number(btn.dataset.dayDown), 1);
+        savePlanner();
+        render(state);
+      });
+    });
+    document.querySelectorAll("[data-day-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const n = Number(btn.dataset.dayRemove);
+        if (!removeDay(trip, n)) return WorldApp.toast("Need at least one day", "warn");
+        const hidden = $("planner-day");
+        if (hidden && Number(hidden.value) > trip.dayCount) hidden.value = String(trip.dayCount);
+        savePlanner();
+        render(state);
+      });
+    });
+
+    bindSegmentEdits(state, trip);
+
     $("seg-save")?.addEventListener("click", () => {
-      const trip = getActiveTrip(state);
-      if (!trip) return;
       addSegment(state, trip.id, {
         countryId: $("seg-country")?.value,
         city: $("seg-city")?.value || "Other",
         startDate: $("seg-start")?.value,
         endDate: $("seg-end")?.value,
       });
-      WorldApp.persistPlanner();
+      savePlanner();
       render(state);
       WorldApp.toast("Segment added");
     });
 
     $("planner-suggest-local")?.addEventListener("click", () => {
-      const trip = getActiveTrip(state);
       const d = Number($("planner-day")?.value) || dayNum || 1;
-      if (!trip) return;
       localSuggestDay(state, trip, d);
-      WorldApp.persistPlanner();
+      savePlanner();
       render(state);
       WorldApp.toast("Suggestions ready");
     });
 
     $("planner-suggest-ai")?.addEventListener("click", async () => {
-      const trip = getActiveTrip(state);
       const d = Number($("planner-day")?.value) || dayNum || 1;
-      if (!trip) return;
       WorldApp.toast("Getting suggestions…");
       await aiSuggestDay(state, trip, d, { hour: new Date().getHours() });
-      WorldApp.persistPlanner();
+      savePlanner();
       render(state);
     });
 
     document.querySelectorAll("[data-adopt-sug]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const trip = getActiveTrip(state);
         const d = Number($("planner-day")?.value) || dayNum || 1;
-        const sug = trip?.suggestions?.find((s) => s.id === btn.dataset.adoptSug);
+        const sug = trip.suggestions?.find((s) => s.id === btn.dataset.adoptSug);
         if (!sug) return;
         adoptSuggestion(state, trip.id, sug, d);
-        WorldApp.persistPlanner();
+        savePlanner();
         render(state);
       });
     });
 
     document.querySelectorAll("[data-remove-entry]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const trip = getActiveTrip(state);
         const d = Number($("planner-day")?.value) || dayNum || 1;
-        if (!trip) return;
         removeEntry(state, trip.id, d, btn.dataset.slot, btn.dataset.removeEntry);
-        WorldApp.persistPlanner();
+        savePlanner();
         render(state);
       });
+    });
+
+    document.querySelectorAll("[data-entry-up]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const d = Number($("planner-day")?.value) || dayNum || 1;
+        moveEntry(state, trip.id, d, btn.dataset.entryUp, -1);
+        savePlanner();
+        render(state);
+      });
+    });
+    document.querySelectorAll("[data-entry-down]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const d = Number($("planner-day")?.value) || dayNum || 1;
+        moveEntry(state, trip.id, d, btn.dataset.entryDown, 1);
+        savePlanner();
+        render(state);
+      });
+    });
+
+    document.querySelectorAll("[data-pick-place]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const d = Number($("planner-day")?.value) || dayNum || 1;
+        const place = state.places.find((p) => p.id === btn.dataset.pickPlace);
+        if (!place) return;
+        const slot = PlaceCategorize.defaultSlot(place.category);
+        addPlace(state, trip.id, d, slot, place, "");
+        savePlanner();
+        render(state);
+        WorldApp.toast(`Added ${place.name}`);
+      });
+    });
+  }
+
+  function bindCreateRows(state) {
+    document.querySelectorAll(".row-remove").forEach((btn) => {
+      btn.onclick = () => {
+        const row = btn.closest(".trip-country-row");
+        const rows = document.querySelectorAll(".trip-country-row");
+        if (rows.length <= 1) return WorldApp.toast("Need at least one country", "warn");
+        row?.remove();
+      };
+    });
+  }
+
+  function populateTripModal(state, place) {
+    const planner = ensurePlanner(state);
+    const tripSel = $("tam-trip");
+    const daySel = $("tam-day");
+    const citySel = $("tam-city");
+    const slotSel = $("tam-slot");
+    if (!tripSel || !daySel || !citySel || !slotSel) return;
+
+    tripSel.innerHTML = planner.trips.length
+      ? planner.trips.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("")
+      : '<option value="">— Create a trip first —</option>';
+
+    slotSel.innerHTML = slotOptions(PlaceCategorize.defaultSlot(place.category));
+
+    const fillDaysAndCities = () => {
+      const trip = planner.trips.find((t) => t.id === tripSel.value) || getActiveTrip(state);
+      if (!trip) {
+        daySel.innerHTML = "";
+        citySel.innerHTML = "";
+        return;
+      }
+      daySel.innerHTML = (trip.days || []).map((d, i) => {
+        const seg = segmentForDay(trip, i + 1);
+        return `<option value="${i + 1}">Day ${i + 1}${d.date ? ` (${d.date})` : ""} — ${esc(seg?.city || "")}</option>`;
+      }).join("");
+
+      const matchingSegs = (trip.segments || []).filter((s) => s.countryId === place.countryId);
+      const segs = matchingSegs.length ? matchingSegs : trip.segments;
+      citySel.innerHTML = segs.map((s) =>
+        `<option value="${esc(s.id)}" ${s.city === place.city ? "selected" : ""}>${esc(s.city)} (${esc(state.countries.find((c) => c.id === s.countryId)?.name || "")})</option>`
+      ).join("");
+    };
+
+    fillDaysAndCities();
+    tripSel.onchange = fillDaysAndCities;
+  }
+
+  function showAddToTripModal(place) {
+    const state = WorldApp.getState();
+    ensurePlanner(state);
+    if (!getActiveTrip(state) && !state.planner.trips.length) {
+      toggle(true);
+      return WorldApp.toast("Create a trip first in Planner", "warn");
+    }
+    pendingPlace = place;
+    $("tam-place-name").textContent = `${place.name} · ${place.city}`;
+    populateTripModal(state, place);
+    const modal = $("trip-add-modal");
+    if (modal) modal.hidden = false;
+  }
+
+  function hideAddToTripModal() {
+    pendingPlace = null;
+    const modal = $("trip-add-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function confirmAddToTrip() {
+    if (!pendingPlace) return;
+    const state = WorldApp.getState();
+    const tripId = $("tam-trip")?.value;
+    const dayNum = Number($("tam-day")?.value) || 1;
+    const slot = $("tam-slot")?.value;
+    const note = $("tam-note")?.value?.trim() || "";
+    const segId = $("tam-city")?.value;
+
+    const trip = ensurePlanner(state).trips.find((t) => t.id === tripId);
+    if (!trip) return WorldApp.toast("Select a trip", "warn");
+    if (!slot) return WorldApp.toast("Select a time slot", "warn");
+
+    const day = trip.days[dayNum - 1];
+    if (day && segId) day.segmentId = segId;
+
+    addPlace(state, trip.id, dayNum, slot, pendingPlace, note);
+    setActiveTrip(state, trip.id);
+    savePlanner({ flush: true });
+    hideAddToTripModal();
+    WorldApp.toast(`Added to day ${dayNum}`);
+  }
+
+  function bindModal() {
+    $("tam-cancel")?.addEventListener("click", hideAddToTripModal);
+    $("tam-confirm")?.addEventListener("click", confirmAddToTrip);
+    $("trip-add-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "trip-add-modal") hideAddToTripModal();
     });
   }
 
@@ -517,25 +907,18 @@ window.WorldPlanner = (() => {
     if (open) render(WorldApp.getState());
   }
 
-  function showAddToTripMenu(place) {
-    const state = WorldApp.getState();
-    const trip = getActiveTrip(state);
-    if (!trip) { toggle(true); return WorldApp.toast("Create a trip first", "warn"); }
-    const dayNum = Number(prompt(`Add "${place.name}" to day? (1-${trip.dayCount})`, "1")) || 1;
-    const slot = prompt(`Slot: ${SLOTS.map((s) => s.id).join(", ")}`, PlaceCategorize.defaultSlot(place.category));
-    if (!slot || !SLOTS.some((s) => s.id === slot)) return;
-    const note = prompt("Note (breakfast, drinks, show…)", "") || "";
-    addPlace(state, trip.id, Math.min(trip.dayCount, Math.max(1, dayNum)), slot, place, note);
-    WorldApp.persistPlanner();
-    WorldApp.toast(`Added to day ${dayNum}`);
-  }
+  function showAddToTripMenu(place) { showAddToTripModal(place); }
 
-  function init() { $("btn-planner")?.addEventListener("click", () => toggle(true)); }
+  function init() {
+    $("btn-planner")?.addEventListener("click", () => toggle(true));
+    bindModal();
+  }
 
   return {
     init, toggle, open: () => toggle(true), render, SLOTS, slotLabel,
     ensurePlanner, migrateTrip, createTrip, getActiveTrip, addPlace, removeEntry,
-    addSegment, segmentForDay, placesForDay, localSuggestDay, aiSuggestDay,
-    adoptSuggestion, showAddToTripMenu, rebuildDays,
+    addSegment, updateSegment, removeSegment, moveSegment, moveDay, removeDay, moveEntry,
+    segmentForDay, placesForDay, localSuggestDay, aiSuggestDay,
+    adoptSuggestion, showAddToTripMenu, showAddToTripModal, rebuildDays,
   };
 })();

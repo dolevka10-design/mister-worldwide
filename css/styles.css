@@ -644,6 +644,76 @@ html, body {
 .planner-add-seg-form { padding: 0.65rem 0.75rem; margin-bottom: 1rem; }
 .planner-add-seg-form summary { cursor: pointer; font-size: 0.85rem; }
 
+/* Trip add modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 5, 8, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 1rem;
+}
+.modal-overlay[hidden] { display: none; }
+.modal {
+  width: min(100%, 22rem);
+  padding: 1rem;
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+.modal h3 { margin: 0 0 0.35rem; font-size: 1rem; }
+.modal-fields { display: grid; gap: 0.5rem; margin: 0.75rem 0; }
+.modal-fields .field span { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 0.2rem; }
+.modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.tam-place-name { margin: 0 0 0.5rem; font-size: 0.85rem; }
+
+/* Multi-country create */
+.trip-country-rows { display: grid; gap: 0.45rem; }
+.trip-country-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  align-items: center;
+}
+.trip-country-row .row-remove { grid-column: 2; justify-self: end; }
+
+/* Segment editor */
+.segment-editable .segment-actions { margin-left: auto; display: flex; gap: 0.15rem; }
+.segment-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+.segment-card-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Day list */
+.day-list { display: grid; gap: 0.35rem; }
+.day-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.day-row.active .day-chip { border-color: var(--accent); }
+.day-row-meta { font-size: 0.75rem; flex: 1; min-width: 4rem; }
+.day-row-actions { display: flex; gap: 0.1rem; }
+
+/* Day itinerary order */
+.planner-day-order .planner-item { align-items: center; }
+.planner-item-order { display: flex; flex-direction: column; gap: 0.1rem; }
+.planner-item-body { flex: 1; min-width: 0; }
+.planner-pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.pick-place-btn { font-size: 0.78rem; white-space: nowrap; }
+
 .globe-tooltip {
   background: rgba(10, 10, 16, 0.95);
   border: 1px solid var(--border);

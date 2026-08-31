@@ -142,6 +142,24 @@
       </form>
     </section>
 
+    <div id="trip-add-modal" class="modal-overlay" hidden>
+      <div class="modal card" role="dialog" aria-labelledby="tam-title">
+        <h3 id="tam-title">Add to trip</h3>
+        <p class="muted tam-place-name" id="tam-place-name"></p>
+        <div class="modal-fields">
+          <label class="field"><span>Trip</span><select id="tam-trip" class="pill-select"></select></label>
+          <label class="field"><span>Day</span><select id="tam-day" class="pill-select"></select></label>
+          <label class="field"><span>City segment</span><select id="tam-city" class="pill-select"></select></label>
+          <label class="field"><span>Time slot</span><select id="tam-slot" class="pill-select"></select></label>
+          <label class="field"><span>Note</span><input id="tam-note" class="pill-select" placeholder="Optional note" /></label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="tam-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="tam-confirm">Add to trip</button>
+        </div>
+      </div>
+    </div>
+
     <div id="toast" class="toast" role="status"></div>
 
     <script src="js/firebase-config.js"></script>
