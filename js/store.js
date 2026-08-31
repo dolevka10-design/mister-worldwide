@@ -76,9 +76,17 @@ window.WorldStore = (() => {
     c.placeCount = pts.length;
   }
 
+  function isRegionCountry(c) {
+    if (!c) return true;
+    if (String(c.id || "").startsWith("region-")) return true;
+    if (/^region\b/i.test(String(c.name || ""))) return true;
+    if (String(c.name || "").trim() === "Unknown") return true;
+    return false;
+  }
+
   function countriesForUi(state) {
     if (!state?.places?.length) {
-      return (state?.countries || []).filter((c) => (c.placeCount || 0) > 0);
+      return (state?.countries || []).filter((c) => (c.placeCount || 0) > 0 && !isRegionCountry(c));
     }
 
     const counts = new Map();
@@ -95,14 +103,15 @@ window.WorldStore = (() => {
     for (const [countryId, placeCount] of counts) {
       if (!placeCount) continue;
       const base = byId.get(countryId);
-      out.push({
+      const country = {
         ...(base || {
           id: countryId,
           name: countryId.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()),
           iso: countryId.slice(0, 2),
         }),
         placeCount,
-      });
+      };
+      if (!isRegionCountry(country)) out.push(country);
     }
 
     return out.sort((a, b) => a.name.localeCompare(b.name));

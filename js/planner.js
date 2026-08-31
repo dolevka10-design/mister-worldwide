@@ -19,6 +19,7 @@ window.WorldPlanner = (() => {
   const $ = (id) => document.getElementById(id);
   let open = false;
   let pendingPlace = null;
+  let view = "list"; // list | create | trip
 
   function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
@@ -291,10 +292,11 @@ window.WorldPlanner = (() => {
   function addSegment(state, tripId, { countryId, city, startDate, endDate }) {
     const trip = ensurePlanner(state).trips.find((t) => t.id === tripId);
     if (!trip) return null;
-    trip.segments.push({ id: WorldStore.uid("seg"), countryId, city: city || "Other", startDate, endDate });
+    const seg = { id: WorldStore.uid("seg"), countryId, city: city || "Other", startDate, endDate };
+    trip.segments.push(seg);
     syncTripBounds(trip);
     rebuildDays(trip);
-    return trip;
+    return seg.id;
   }
 
   function localSuggestDay(state, trip, dayNum, opts = {}) {
@@ -434,15 +436,50 @@ window.WorldPlanner = (() => {
     return rows;
   }
 
-  function segmentPhotoUrl(seg, country) {
+  function segmentPhotoStyle(seg) {
     const city = seg?.city || "city";
-    const lat = country?.lat;
-    const lng = country?.lng;
-    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=11&size=640x240&mapnik`;
+    let h = 0;
+    for (let i = 0; i < city.length; i++) h = (h * 31 + city.charCodeAt(i)) >>> 0;
+    const hue = h % 360;
+    return `background:linear-gradient(135deg,hsl(${hue},42%,32%) 0%,hsl(${(hue + 48) % 360},30%,16%) 100%)`;
+  }
+
+  function formatTripDates(trip) {
+    if (trip.startDate && trip.endDate) return `${trip.startDate} → ${trip.endDate}`;
+    if (trip.startDate) return `from ${trip.startDate}`;
+    if (trip.endDate) return `until ${trip.endDate}`;
+    return "Dates not set";
+  }
+
+  function renderTripList(state) {
+    const trips = ensurePlanner(state).trips || [];
+    if (!trips.length) {
+      return `
+        <div class="planner-empty card">
+          <h3>No trips yet</h3>
+          <p class="muted">Plan multi-country routes with daily itineraries from your saved places.</p>
+          <button type="button" class="btn btn-primary" id="planner-new-trip-list" style="width:100%;margin-top:0.65rem;min-height:48px">+ New trip</button>
+        </div>`;
     }
-    const seed = encodeURIComponent(city.toLowerCase().replace(/\s+/g, "-"));
-    return `https://picsum.photos/seed/${seed}/640/240`;
+    return `
+      <div class="planner-list-actions">
+        <button type="button" class="btn btn-primary" id="planner-new-trip-list">+ New trip</button>
+      </div>
+      <ul class="planner-trip-list">
+        ${trips.map((t) => {
+          const stops = (t.segments || []).map((s) => s.city).filter(Boolean).join(" · ");
+          return `<li>
+            <button type="button" class="trip-list-item card" data-open-trip="${esc(t.id)}">
+              <div class="trip-list-main">
+                <strong>${esc(t.name)}</strong>
+                <span class="muted place-meta">${esc(formatTripDates(t))}</span>
+                ${stops ? `<span class="muted place-meta">${esc(stops)}</span>` : ""}
+              </div>
+              <span class="trip-list-chevron" aria-hidden="true">›</span>
+            </button>
+          </li>`;
+        }).join("")}
+      </ul>`;
   }
 
   function renderEditableSegments(state, trip) {
@@ -452,9 +489,9 @@ window.WorldPlanner = (() => {
       const opts = countries.map((cc) =>
         `<option value="${esc(cc.id)}" ${cc.id === s.countryId ? "selected" : ""}>${esc(cc.name)}</option>`
       ).join("");
-      const photo = segmentPhotoUrl(s, c);
+      const photoStyle = segmentPhotoStyle(s);
       return `<article class="segment-card card segment-editable" id="seg-${esc(s.id)}" data-seg-id="${esc(s.id)}">
-        <div class="segment-photo" style="background-image:url('${photo}')">
+        <div class="segment-photo" style="${photoStyle}">
           <div class="segment-photo-overlay">
             ${c ? `<img class="segment-flag" src="${CountryMeta.flagUrl(c.iso, 24)}" alt="" width="28" height="20"/>` : ""}
             <div><strong>${esc(s.city)}</strong><span class="muted place-meta">${esc(c?.name || "Country")}</span></div>
@@ -635,25 +672,50 @@ window.WorldPlanner = (() => {
       <input type="hidden" id="planner-day" value="${dayNum}" />`;
   }
 
+  function renderBody(state, dayNum) {
+    if (view === "create") return renderCreateForm(state);
+    if (view === "trip") {
+      const trip = getActiveTrip(state);
+      if (!trip) {
+        view = "list";
+        return renderTripList(state);
+      }
+      return renderPlan(state, trip, dayNum);
+    }
+    return renderTripList(state);
+  }
+
   function render(stateIn) {
     const state = stateIn || WorldApp.getState();
     const panel = $("planner-panel");
     if (!panel) return;
-    const trip = getActiveTrip(state);
     const dayNum = Number($("planner-day")?.value) || 1;
+    const showBack = view === "create" || view === "trip";
 
     panel.innerHTML = `
       <header class="planner-head">
-        <div><strong>Travel Planner</strong><p class="muted assist-sub">Countries · cities · daily itinerary</p></div>
-        <button type="button" class="btn btn-ghost btn-sm" id="planner-close">✕</button>
+        <div class="planner-head-main">
+          ${showBack ? '<button type="button" class="btn btn-ghost btn-sm" id="planner-back" aria-label="Back">←</button>' : ""}
+          <div>
+            <strong>Travel Planner</strong>
+            <p class="muted assist-sub">Countries · cities · daily itinerary</p>
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="planner-close" aria-label="Close">✕</button>
       </header>
-      <div class="planner-body">${trip ? renderPlan(state, trip, dayNum) : renderCreateForm(state)}</div>`;
+      <div class="planner-body">${renderBody(state, dayNum)}</div>`;
 
     bindPanel(state, dayNum);
     return state;
   }
 
   function refreshPlannerUI({ scroll, close, toast: toastMsg } = {}) {
+    if (close) {
+      view = "list";
+      WorldApp.toast(toastMsg || "Trip saved");
+      toggle(false);
+      return;
+    }
     render(WorldApp.getState());
     requestAnimationFrame(() => {
       const body = document.querySelector(".planner-body");
@@ -666,7 +728,6 @@ window.WorldPlanner = (() => {
       } else if (body) {
         body.scrollTop = 0;
       }
-      if (close) toggle(false);
     });
     if (toastMsg) WorldApp.toast(toastMsg);
   }
@@ -715,8 +776,25 @@ window.WorldPlanner = (() => {
 
   function bindPanel(state, dayNum) {
     $("planner-close")?.addEventListener("click", () => toggle(false));
+    $("planner-back")?.addEventListener("click", () => {
+      view = "list";
+      render(state);
+    });
 
-    $("planner-save")?.addEventListener("click", () => savePlanner({ flush: true, close: true }));
+    $("planner-new-trip-list")?.addEventListener("click", () => {
+      view = "create";
+      render(state);
+    });
+
+    document.querySelectorAll("[data-open-trip]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setActiveTrip(state, btn.dataset.openTrip);
+        view = "trip";
+        render(state);
+      });
+    });
+
+    $("planner-save")?.addEventListener("click", () => savePlanner({ flush: true, close: true, toast: "Trip saved" }));
 
     $("planner-export")?.addEventListener("click", () => {
       const trip = getActiveTrip(state);
@@ -727,6 +805,7 @@ window.WorldPlanner = (() => {
 
     $("planner-trip")?.addEventListener("change", (e) => {
       setActiveTrip(state, e.target.value);
+      view = "trip";
       savePlanner({ scroll: "#planner-route", toast: "Trip switched" });
     });
 
@@ -748,15 +827,16 @@ window.WorldPlanner = (() => {
         if (!s.startDate || !s.endDate) return WorldApp.toast("Each country needs start and end dates", "warn");
       }
       createTrip(state, { name, segments });
+      view = "trip";
       savePlanner({ flush: true, scroll: "#planner-route", toast: "Trip created" });
     });
 
     $("planner-new-trip")?.addEventListener("click", () => {
-      ensurePlanner(state).activeTripId = null;
+      view = "create";
       render(state);
     });
 
-    const trip = getActiveTrip(state);
+    const trip = view === "trip" ? getActiveTrip(state) : null;
     if (!trip) return;
 
     $("planner-start")?.addEventListener("change", () => {
@@ -812,8 +892,13 @@ window.WorldPlanner = (() => {
       const startDate = $("seg-start")?.value;
       const endDate = $("seg-end")?.value;
       if (!countryId) return WorldApp.toast("Pick a country", "warn");
-      addSegment(state, trip.id, { countryId, city, startDate, endDate });
-      savePlanner({ scroll: "#planner-route", toast: "Segment added" });
+      const segId = addSegment(state, trip.id, { countryId, city, startDate, endDate });
+      if ($("seg-city")) $("seg-city").value = "";
+      if ($("seg-start")) $("seg-start").value = "";
+      if ($("seg-end")) $("seg-end").value = "";
+      const form = document.querySelector(".planner-add-seg-form");
+      if (form) form.open = false;
+      savePlanner({ scroll: segId ? `#seg-${segId}` : "#planner-route", toast: "Segment added" });
     });
 
     $("planner-suggest-local")?.addEventListener("click", () => {
@@ -926,7 +1011,7 @@ window.WorldPlanner = (() => {
     const state = WorldApp.getState();
     ensurePlanner(state);
     if (!getActiveTrip(state) && !state.planner.trips.length) {
-      toggle(true);
+      toggle(true, { view: "create" });
       return WorldApp.toast("Create a trip first in Planner", "warn");
     }
     pendingPlace = place;
@@ -960,6 +1045,7 @@ window.WorldPlanner = (() => {
 
     addPlace(state, trip.id, dayNum, slot, pendingPlace, note);
     setActiveTrip(state, trip.id);
+    view = "trip";
     savePlanner({ flush: true });
     hideAddToTripModal();
     WorldApp.toast(`Added to day ${dayNum}`);
@@ -973,13 +1059,17 @@ window.WorldPlanner = (() => {
     });
   }
 
-  function toggle(on) {
+  function toggle(on, opts = {}) {
     open = on != null ? !!on : !open;
     const panel = $("planner-panel");
     if (!panel) return;
     panel.classList.toggle("open", open);
     panel.hidden = !open;
-    if (open) render(WorldApp.getState());
+    if (open) {
+      if (opts.view) view = opts.view;
+      else if (!opts.keepView) view = "list";
+      render(WorldApp.getState());
+    }
   }
 
   function showAddToTripMenu(place) { showAddToTripModal(place); }
