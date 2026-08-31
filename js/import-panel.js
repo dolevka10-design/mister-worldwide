@@ -25,6 +25,7 @@ window.WorldImportPanel = (() => {
       <div class="import-tabs">
         <button type="button" class="import-tab ${activeTab === "takeout" ? "active" : ""}" data-tab="takeout">Takeout ZIP</button>
         <button type="button" class="import-tab ${activeTab === "csv" ? "active" : ""}" data-tab="csv">Paste CSV</button>
+        <button type="button" class="import-tab ${activeTab === "url" ? "active" : ""}" data-tab="url">Maps URL</button>
       </div>
       <div class="import-body">
         ${activeTab === "takeout" ? `
@@ -38,6 +39,13 @@ window.WorldImportPanel = (() => {
             </label>
             <p class="import-status muted" id="import-status"></p>
             <ul class="import-log" id="import-log"></ul>
+          </section>
+        ` : activeTab === "url" ? `
+          <section class="import-section">
+            <p class="muted assist-sub">Paste one or more Google Maps place URLs (one per line). Coordinates are read from the link when possible; otherwise the place is geocoded.</p>
+            <textarea id="import-url-paste" class="import-paste" rows="6" placeholder="https://maps.google.com/..."></textarea>
+            <button type="button" class="btn btn-primary btn-sm" id="import-url-btn">Import URLs</button>
+            <p class="import-status muted" id="import-url-result"></p>
           </section>
         ` : `
           <section class="import-section">
@@ -92,6 +100,24 @@ window.WorldImportPanel = (() => {
         }
         WorldApp.toast(`Imported ${r.added.length} places`);
       } catch (e) {
+        WorldApp.toast(e.message || "Import failed", "error");
+      }
+    });
+
+    $("import-url-btn")?.addEventListener("click", async () => {
+      const text = $("import-url-paste")?.value?.trim();
+      if (!text) return WorldApp.toast("Paste Maps URL(s) first", "warn");
+      const el = $("import-url-result");
+      if (el) el.textContent = "Importing…";
+      try {
+        const r = await WorldMapsImport.importMapsUrls(state, text);
+        WorldApp.persist();
+        WorldApp.refresh();
+        const summary = `Added ${r.added.length}${r.geocoded ? ` (${r.geocoded} geocoded)` : ""}${r.skipped.length ? ` · skipped ${r.skipped.length}` : ""}`;
+        if (el) el.textContent = summary;
+        WorldApp.toast(`Imported ${r.added.length} places`);
+      } catch (e) {
+        if (el) el.textContent = e.message || "Import failed";
         WorldApp.toast(e.message || "Import failed", "error");
       }
     });

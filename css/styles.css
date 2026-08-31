@@ -714,6 +714,35 @@ html, body {
 }
 .pick-place-btn { font-size: 0.78rem; white-space: nowrap; }
 
+.planner-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  padding: 1rem 0 0.5rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(to top, var(--card) 80%, transparent);
+}
+.planner-footer .btn-primary { flex: 1; max-width: 12rem; }
+
+.maps-url-add {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.assist-key-form {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(124, 240, 255, 0.04);
+}
+.assist-key-form .field { display: block; margin-bottom: 0.45rem; }
+.assist-key-form .field span { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 0.2rem; }
+.assist-key-actions { display: flex; gap: 0.35rem; justify-content: flex-end; margin-top: 0.35rem; }
+
 .globe-tooltip {
   background: rgba(10, 10, 16, 0.95);
   border: 1px solid var(--border);

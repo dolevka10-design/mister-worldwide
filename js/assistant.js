@@ -358,6 +358,78 @@
     return email || "local";
   }
 
+  function syncUserFromApp() {
+    if (currentUser?.email && currentUser.email !== "local@device") return currentUser;
+    const u = window.WorldApp?.getUser?.();
+    if (u?.email) {
+      currentUser = {
+        uid: u.uid || null,
+        email: String(u.email).trim().toLowerCase(),
+        displayName: u.displayName || String(u.email).split("@")[0],
+      };
+      return currentUser;
+    }
+    if (!WorldCloud?.configured && !currentUser) {
+      currentUser = { uid: "local", email: "local@device", displayName: "Local" };
+    }
+    return currentUser;
+  }
+
+  function ensureAssistantUser() {
+    syncUserFromApp();
+    if (currentUser) return true;
+    if (WorldCloud?.configured) {
+      bot("Sign in with an allowlisted account, then add your API key.");
+      return false;
+    }
+    currentUser = { uid: "local", email: "local@device", displayName: "Local" };
+    return true;
+  }
+
+  function toggleKeyForm(show) {
+    const form = $("assist-key-form");
+    if (!form) return;
+    const shouldShow = show != null ? !!show : !!form.hidden;
+    form.hidden = !shouldShow;
+    if (shouldShow) {
+      const prov = $("assist-key-provider");
+      const input = $("assist-key-input");
+      if (prov) prov.value = providerId === "auto" ? "gemini" : providerId;
+      if (input) {
+        const cur = getApiKey(prov?.value || providerId);
+        input.value = "";
+        input.placeholder = cur ? "Paste new key to replace (leave blank + Clear to remove)" : "Paste your API key";
+      }
+    }
+  }
+
+  function saveKeyFromForm() {
+    if (!ensureAssistantUser()) return;
+    const prov = normalizeProvider($("assist-key-provider")?.value || providerId);
+    const raw = $("assist-key-input")?.value?.trim();
+    if (!raw) {
+      bot("Paste a key in the field, or tap Clear to remove the saved key.");
+      return;
+    }
+    const cleaned = raw.replace(/^["']|["']$/g, "");
+    const withPrefix = parseKeyCommand(`key ${cleaned}`);
+    const savedAs = setApiKey(withPrefix?.key || cleaned, prov || withPrefix?.provider || detectProviderFromKey(cleaned));
+    toggleKeyForm(false);
+    bot(
+      `${PROVIDERS[savedAs].label} key saved${WorldCloud?.configured && currentUser?.uid !== "local" ? " to cloud" : ""}.\n` +
+        "Pick a model above (key ✓) or use Auto mode."
+    );
+  }
+
+  function clearKeyFromForm() {
+    if (!ensureAssistantUser()) return;
+    const prov = normalizeProvider($("assist-key-provider")?.value || providerId);
+    clearApiKey(prov);
+    const input = $("assist-key-input");
+    if (input) input.value = "";
+    bot(`${PROVIDERS[prov].label} key cleared.`);
+  }
+
   function storageKey() {
     return LS_PREFIX + userKey();
   }
@@ -764,9 +836,13 @@
     const fab = $("assist-fab");
     if (!panel) return;
     const shouldOpen = open !== false;
+    syncUserFromApp();
     panel.classList.toggle("open", shouldOpen);
     if (shouldOpen) panel.removeAttribute("hidden");
-    else panel.setAttribute("hidden", "");
+    else {
+      panel.setAttribute("hidden", "");
+      toggleKeyForm(false);
+    }
     fab?.classList.toggle("open", shouldOpen);
     if (shouldOpen) $("assist-input")?.focus();
   }
@@ -1914,10 +1990,7 @@
   async function handleMessage(raw) {
     const text = String(raw || "").trim();
     if (!text || busy) return;
-    if (!currentUser) {
-      bot("Sign in with an allowlisted account to use the AI assistant.");
-      return;
-    }
+    if (!ensureAssistantUser()) return;
     me(text);
 
     const keyCmd = parseKeyCommand(text);
@@ -1955,8 +2028,8 @@
       return;
     }
 
-    if (!window.WorldApp?.ready?.()) {
-      bot("Sign in first, then chat with me.");
+    if (!window.WorldApp?.getState?.()) {
+      bot("App still loading — try again in a moment.");
       return;
     }
 
@@ -2186,49 +2259,32 @@
 
     keyBtn?.addEventListener("click", () => {
       openPanel(true);
-      if (!currentUser) {
+      syncUserFromApp();
+      if (!currentUser && WorldCloud?.configured) {
         bot("Sign in first — each allowlisted user has their own AI key.");
         return;
       }
-      const which = prompt(
-        `Which provider key for ${currentUser.email}?\n` +
-          `1 = Gemini (AIza…)\n` +
-          `2 = Groq (gsk_…)\n` +
-          `3 = OpenRouter (sk-or-…)\n` +
-          `Or leave blank to auto-detect from the key.`,
-        providerId === "groq" ? "2" : providerId === "openrouter" ? "3" : "1"
-      );
-      if (which == null) return;
-      const hintMap = { 1: "gemini", 2: "groq", 3: "openrouter", gemini: "gemini", groq: "groq", openrouter: "openrouter" };
-      const hint = hintMap[String(which).trim().toLowerCase()] || null;
-
-      const target = hint || providerId;
-      const cur = getApiKey(target);
-      const next = prompt(
-        `Paste ${hint ? PROVIDERS[hint].label : "API"} key\n` +
-          `Gemini: AIza…  ·  Groq: gsk_…  ·  OpenRouter: sk-or-…\n` +
-          `Blank = clear ${PROVIDERS[target]?.label || target} key.`,
-        cur ? "" : ""
-      );
-      if (next == null) return;
-      if (!next.trim()) {
-        clearApiKey(target);
-        scheduleCloudSave();
-        bot(`${PROVIDERS[target].label} key cleared. Other provider keys kept.`);
-        refreshModelSelect();
-        return;
+      if (!currentUser) {
+        currentUser = { uid: "local", email: "local@device", displayName: "Local" };
       }
-      const cleaned = next.trim().replace(/^["']|["']$/g, "");
-      const withPrefix = parseKeyCommand(`key ${cleaned}`);
-      const savedAs = setApiKey(
-        withPrefix?.key || cleaned,
-        hint || withPrefix?.provider || detectProviderFromKey(cleaned) || "gemini"
-      );
-      bot(
-        `${PROVIDERS[savedAs].label} key saved to this browser and cloud.\n` +
-          "Survives Netlify uploads — sign in on any browser to reload it.\n" +
-          "Model dropdown → pick a model (key ✓)."
-      );
+      toggleKeyForm(true);
+    });
+
+    $("assist-key-save")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      saveKeyFromForm();
+    });
+    $("assist-key-clear")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      clearKeyFromForm();
+    });
+    $("assist-key-provider")?.addEventListener("change", () => {
+      const prov = $("assist-key-provider")?.value;
+      const input = $("assist-key-input");
+      if (input) {
+        const cur = getApiKey(prov);
+        input.placeholder = cur ? "Paste new key to replace" : "Paste your API key";
+      }
     });
 
     form.addEventListener("submit", (e) => {

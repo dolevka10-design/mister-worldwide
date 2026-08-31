@@ -340,8 +340,73 @@ window.WorldMapsImport = (() => {
     };
   }
 
+  function parseCoordsFromUrl(url) {
+    const s = String(url || "");
+    let m = s.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/i);
+    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+    m = s.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)(?:,|\?|\/|$)/);
+    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+    m = s.match(/[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)/);
+    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+    m = s.match(/!8m2!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/i);
+    if (m) return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+    return null;
+  }
+
+  function isMapsUrl(text) {
+    return /google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl/i.test(String(text || ""));
+  }
+
+  async function importMapsUrls(state, text, { countryId, countryName, city } = {}) {
+    const lines = String(text || "").split(/\n/).map((s) => s.trim()).filter(Boolean);
+    const urls = lines.filter((l) => isMapsUrl(l) || l.startsWith("http"));
+    if (!urls.length) throw new Error("Paste one or more Google Maps URLs");
+
+    const byUrl = buildUrlIndex(state);
+    const existingKeys = new Set((state.places || []).map((p) => `${norm(p.name)}|${p.lat?.toFixed(4)}|${p.lng?.toFixed(4)}`));
+    const added = [];
+    const skipped = [];
+    const pending = [];
+    const country = countryId ? state.countries.find((c) => c.id === countryId) : null;
+    const defaultCountry = countryName || country?.name || "";
+
+    for (const url of urls) {
+      if (!isMapsUrl(url)) continue;
+      const name = nameFromUrl(url) || "Saved place";
+      const coords = parseCoordsFromUrl(url);
+      if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+        const r = addPlace(state, {
+          name,
+          desc: `${city || ""} | ${defaultCountry} | ${url}`,
+          lat: coords.lat,
+          lng: coords.lng,
+          url,
+          countryName: defaultCountry,
+          city: city || "",
+          byUrl,
+          existingKeys,
+        });
+        if (r.status === "added") added.push(r.place);
+        else if (r.status === "skipped") skipped.push(name);
+      } else {
+        pending.push({ name, url, countryName: defaultCountry, city: city || "", desc: "" });
+      }
+    }
+
+    if (pending.length) {
+      const before = added.length;
+      const geocoded = await resolvePending(state, pending);
+      added.push(...geocoded);
+      WorldStore.recategorizePlaces(state);
+      return { added, skipped, geocoded: added.length - before, pending: pending.length - geocoded.length };
+    }
+
+    WorldStore.recategorizePlaces(state);
+    return { added, skipped, geocoded: 0, pending: 0 };
+  }
+
   return {
-    parseCsv, importText, importTakeoutCsv, importTakeoutZip,
-    urlFingerprint, nameFromUrl, hintFromFilename, geocodePlace,
+    parseCsv, importText, importTakeoutCsv, importTakeoutZip, importMapsUrls,
+    urlFingerprint, nameFromUrl, hintFromFilename, geocodePlace, parseCoordsFromUrl, isMapsUrl,
   };
 })();

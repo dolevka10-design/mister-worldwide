@@ -511,6 +511,52 @@ window.WorldPlanner = (() => {
       </section>`;
   }
 
+  function csvCell(v) {
+    const s = String(v ?? "");
+    return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  function exportTripSpreadsheet(state, trip) {
+    const lines = [];
+    lines.push(["Trip", trip.name, "Start", trip.startDate || "", "End", trip.endDate || ""].map(csvCell).join(","));
+    lines.push("");
+    lines.push(["Segment#", "Country", "City", "Start", "End"].map(csvCell).join(","));
+    (trip.segments || []).forEach((s, i) => {
+      const c = state.countries.find((x) => x.id === s.countryId);
+      lines.push([i + 1, c?.name || s.countryId, s.city, s.startDate || "", s.endDate || ""].map(csvCell).join(","));
+    });
+    lines.push("");
+    lines.push(["Day", "Date", "Segment City", "Segment Country", "Slot", "Place", "Category", "Note", "URL", "Lat", "Lng"].map(csvCell).join(","));
+    for (let d = 1; d <= (trip.dayCount || 0); d++) {
+      const day = trip.days?.[d - 1];
+      const seg = segmentForDay(trip, d);
+      const country = state.countries.find((c) => c.id === seg?.countryId);
+      const flat = day ? flatDayEntries(day) : [];
+      if (!flat.length) {
+        lines.push([d, day?.date || "", seg?.city || "", country?.name || "", "", "", "", "", "", "", ""].map(csvCell).join(","));
+      } else {
+        for (const { slot, entry } of flat) {
+          lines.push([
+            d, day?.date || "", seg?.city || "", country?.name || "", slotLabel(slot),
+            entry.name, PlaceCategorize.label(entry.category), entry.note || "", entry.url || "",
+            entry.lat ?? "", entry.lng ?? "",
+          ].map(csvCell).join(","));
+        }
+      }
+    }
+    return `\uFEFF${lines.join("\n")}`;
+  }
+
+  function downloadTripExcel(state, trip) {
+    const safe = (trip.name || "trip").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "trip";
+    const blob = new Blob([exportTripSpreadsheet(state, trip)], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${safe}-itinerary.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   function renderPlan(state, trip, dayNum) {
     const day = trip?.days?.[dayNum - 1];
     const seg = trip ? segmentForDay(trip, dayNum) : null;
@@ -532,7 +578,6 @@ window.WorldPlanner = (() => {
             `<option value="${esc(t.id)}" ${t.id === ensurePlanner(state).activeTripId ? "selected" : ""}>${esc(t.name)}</option>`
           ).join("")}</select>
           <button type="button" class="btn btn-ghost btn-sm" id="planner-new-trip">+ New</button>
-          <button type="button" class="btn btn-primary btn-sm" id="planner-save">Save trip</button>
         </div>
       </div>
       <div class="planner-dates planner-grid">
@@ -565,6 +610,10 @@ window.WorldPlanner = (() => {
       <section class="planner-section"><h3>Suggestions</h3><ul class="planner-suggestions">${sugHtml || '<li class="muted">Tap Quick suggest or AI suggest</li>'}</ul></section>
       <section class="planner-section"><h3>Day ${dayNum} places</h3>${renderDayItinerary(day)}</section>
       ${renderPlacePicker(state, trip, dayNum)}
+      <footer class="planner-footer">
+        <button type="button" class="btn btn-secondary btn-sm" id="planner-export">Export Excel</button>
+        <button type="button" class="btn btn-primary" id="planner-save">Save trip</button>
+      </footer>
       <input type="hidden" id="planner-day" value="${dayNum}" />`;
   }
 
@@ -585,8 +634,13 @@ window.WorldPlanner = (() => {
     bindPanel(state, dayNum);
   }
 
-  function savePlanner({ flush } = {}) {
+  function savePlanner({ flush, close } = {}) {
     WorldApp.persistPlanner({ flush });
+    if (close) {
+      WorldApp.toast(flush ? "Trip saved — syncing to cloud" : "Trip saved");
+      toggle(false);
+      return;
+    }
     WorldApp.toast(flush ? "Trip saved — syncing to cloud" : "Trip saved");
   }
 
@@ -630,7 +684,14 @@ window.WorldPlanner = (() => {
   function bindPanel(state, dayNum) {
     $("planner-close")?.addEventListener("click", () => toggle(false));
 
-    $("planner-save")?.addEventListener("click", () => savePlanner({ flush: true }));
+    $("planner-save")?.addEventListener("click", () => savePlanner({ flush: true, close: true }));
+
+    $("planner-export")?.addEventListener("click", () => {
+      const trip = getActiveTrip(state);
+      if (!trip) return;
+      downloadTripExcel(state, trip);
+      WorldApp.toast("Trip exported");
+    });
 
     $("planner-trip")?.addEventListener("change", (e) => {
       setActiveTrip(state, e.target.value);
@@ -919,6 +980,6 @@ window.WorldPlanner = (() => {
     ensurePlanner, migrateTrip, createTrip, getActiveTrip, addPlace, removeEntry,
     addSegment, updateSegment, removeSegment, moveSegment, moveDay, removeDay, moveEntry,
     segmentForDay, placesForDay, localSuggestDay, aiSuggestDay,
-    adoptSuggestion, showAddToTripMenu, showAddToTripModal, rebuildDays,
+    adoptSuggestion, showAddToTripMenu, showAddToTripModal, rebuildDays, exportTripSpreadsheet, downloadTripExcel,
   };
 })();

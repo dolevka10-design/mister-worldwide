@@ -306,6 +306,28 @@ window.WorldApp = (() => {
       renderCountryPanel();
     });
 
+    $("btn-add-maps-url")?.addEventListener("click", async () => {
+      const url = $("maps-url-input")?.value?.trim();
+      if (!url) return toast("Paste a Google Maps URL", "warn");
+      if (!selectedCountry) return toast("Select a country first", "warn");
+      const country = state.countries.find((c) => c.id === selectedCountry);
+      const btn = $("btn-add-maps-url");
+      if (btn) { btn.disabled = true; btn.textContent = "Adding…"; }
+      try {
+        const r = await WorldMapsImport.importMapsUrls(state, url, {
+          countryId: selectedCountry,
+          countryName: country?.name,
+        });
+        persist();
+        $("maps-url-input").value = "";
+        toast(`Added ${r.added.length} place${r.added.length === 1 ? "" : "s"}`);
+      } catch (e) {
+        toast(e.message || "Could not add URL", "error");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Add URL"; }
+      }
+    });
+
     $("btn-export-csv")?.addEventListener("click", () => {
       if (!selectedCountry) return toast("Select a country first", "warn");
       const csv = WorldStore.exportCountryCsv(state, selectedCountry);
@@ -503,13 +525,17 @@ window.WorldApp = (() => {
         refresh();
         ensureGlobe();
       });
-      WorldAssistant?.bindUser?.({ uid: u.uid, email: u.email, displayName: u.displayName });
+      await WorldAssistant?.bindUser?.({ uid: u.uid, email: u.email, displayName: u.displayName });
     } else {
       WorldStore.setUserEmail("local");
       state = WorldStore.reconcileState(WorldStore.loadState());
       showAuth(WorldCloud.configured);
       $("user-chip").textContent = WorldCloud.configured ? "" : "Local mode";
-      WorldAssistant?.unbindUser?.();
+      if (WorldCloud.configured) {
+        await WorldAssistant?.unbindUser?.();
+      } else {
+        await WorldAssistant?.bindUser?.({ uid: "local", email: "local@device", displayName: "Local" });
+      }
     }
     CountryMeta.init(state.countries);
     refresh();

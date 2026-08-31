@@ -111,6 +111,10 @@
               <button type="button" class="tab" id="view-list">List</button>
             </div>
             <button type="button" class="btn btn-secondary" id="btn-export-csv">Export CSV</button>
+            <div class="maps-url-add">
+              <input id="maps-url-input" type="url" class="search-input" placeholder="Paste Google Maps URL…" inputmode="url" />
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-add-maps-url">Add URL</button>
+            </div>
           </div>
         </div>
         <div id="panel-body" class="panel-body"></div>
@@ -135,6 +139,22 @@
           <button type="button" class="btn btn-ghost btn-sm" id="assist-close">✕</button>
         </div>
       </header>
+      <div id="assist-key-form" class="assist-key-form" hidden>
+        <label class="field"><span>Provider</span>
+          <select id="assist-key-provider" class="pill-select">
+            <option value="gemini">Gemini (AIza…)</option>
+            <option value="groq">Groq (gsk_…)</option>
+            <option value="openrouter">OpenRouter (sk-or-…)</option>
+          </select>
+        </label>
+        <label class="field"><span>API key</span>
+          <input id="assist-key-input" class="pill-select" type="password" autocomplete="off" placeholder="Paste your API key" />
+        </label>
+        <div class="assist-key-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="assist-key-clear">Clear</button>
+          <button type="button" class="btn btn-primary btn-sm" id="assist-key-save">Save key</button>
+        </div>
+      </div>
       <div class="assist-log" id="assist-log"></div>
       <form class="assist-form" id="assist-form">
         <input id="assist-input" type="text" placeholder="Add a museum in Tokyo, import CSV, list restaurants in Paris…" autocomplete="off" />
