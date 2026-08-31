@@ -101,6 +101,12 @@ window.WorldApp = (() => {
     right.disabled = max <= 2 || list.scrollLeft >= max - 2;
   }
 
+  function countryStripScrollStep() {
+    const list = $("country-list");
+    if (!list) return 180;
+    return Math.max(140, Math.round(list.clientWidth * 0.72));
+  }
+
   function selectCountry(countryId) {
     selectedCountry = countryId;
     filterCategory = "";
@@ -200,14 +206,15 @@ window.WorldApp = (() => {
     });
 
     $("country-scroll-left")?.addEventListener("click", () => {
-      $("country-list")?.scrollBy({ left: -220, behavior: "smooth" });
+      $("country-list")?.scrollBy({ left: -countryStripScrollStep(), behavior: "smooth" });
       setTimeout(updateCountryStripArrows, 280);
     });
     $("country-scroll-right")?.addEventListener("click", () => {
-      $("country-list")?.scrollBy({ left: 220, behavior: "smooth" });
+      $("country-list")?.scrollBy({ left: countryStripScrollStep(), behavior: "smooth" });
       setTimeout(updateCountryStripArrows, 280);
     });
     $("country-list")?.addEventListener("scroll", updateCountryStripArrows);
+    window.addEventListener("resize", updateCountryStripArrows);
 
     $("view-category")?.addEventListener("click", () => {
       viewMode = "category";

@@ -10,6 +10,10 @@ window.WorldGlobe = (() => {
   let centroidsByName = new Map();
   let autoRotateEnabled = false;
   let pinClickBound = false;
+  let globeDragging = false;
+  let pointerSession = null;
+  const TAP_MOVE_PX = 14;
+  const TAP_MAX_MS = 400;
 
   const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
   const EARTH_TEX_CDN = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
@@ -180,21 +184,52 @@ window.WorldGlobe = (() => {
     if (pinClickBound) return;
     pinClickBound = true;
 
+    const onPointerDown = (e) => {
+      pointerSession = {
+        x: e.clientX,
+        y: e.clientY,
+        t: Date.now(),
+        moved: false,
+      };
+    };
+
+    const onPointerMove = (e) => {
+      if (!pointerSession || pointerSession.moved) return;
+      const dx = e.clientX - pointerSession.x;
+      const dy = e.clientY - pointerSession.y;
+      if (Math.hypot(dx, dy) > TAP_MOVE_PX) pointerSession.moved = true;
+    };
+
+    const onPointerEnd = () => {
+      if (!pointerSession) return;
+      const session = pointerSession;
+      pointerSession = null;
+      if (session.moved || globeDragging) {
+        session.suppressClick = true;
+        setTimeout(() => {
+          session.suppressClick = false;
+        }, 80);
+      }
+      el._lastPointerSession = session;
+    };
+
+    el.addEventListener("pointerdown", onPointerDown, { passive: true });
+    el.addEventListener("pointermove", onPointerMove, { passive: true });
+    el.addEventListener("pointerup", onPointerEnd, { passive: true });
+    el.addEventListener("pointercancel", onPointerEnd, { passive: true });
+
     const pick = (e) => {
       const pin = e.target.closest?.(".globe-flag-pin");
       if (!pin?.dataset?.countryId) return;
+      const session = el._lastPointerSession;
+      if (globeDragging || session?.suppressClick || session?.moved) return;
+      if (session && Date.now() - session.t > TAP_MAX_MS) return;
       e.preventDefault();
       e.stopPropagation();
       selectCountry(pin.dataset.countryId);
     };
 
     el.addEventListener("click", pick);
-    el.addEventListener("touchend", (e) => {
-      if (e.changedTouches?.length !== 1) return;
-      const pin = e.target.closest?.(".globe-flag-pin");
-      if (!pin) return;
-      pick(e);
-    }, { passive: false });
   }
 
   function bindResize(el) {
@@ -214,7 +249,6 @@ window.WorldGlobe = (() => {
     if (!globe) return;
     const data = pinsVisible ? pinData(countries) : [];
     globe.htmlElementsData(data);
-    globe.pointsData(data);
   }
 
   function bindControls(controls) {
@@ -225,6 +259,14 @@ window.WorldGlobe = (() => {
     controls.dampingFactor = 0.08;
     controls.minDistance = 95;
     controls.maxDistance = 420;
+    controls.addEventListener("start", () => {
+      globeDragging = true;
+    });
+    controls.addEventListener("end", () => {
+      setTimeout(() => {
+        globeDragging = false;
+      }, 60);
+    });
     applyAutoRotate();
   }
 
@@ -277,15 +319,6 @@ window.WorldGlobe = (() => {
       .htmlAltitude(0.04)
       .htmlElement((d) => makeFlagPin(d));
 
-    globe
-      .pointsData([])
-      .pointLat("lat")
-      .pointLng("lng")
-      .pointAltitude(0.04)
-      .pointRadius(0.85)
-      .pointColor(() => "rgba(124, 240, 255, 0.01)")
-      .onPointClick((p) => selectCountry(p.id));
-
     bindControls(globe.controls());
 
     try {
@@ -311,7 +344,6 @@ window.WorldGlobe = (() => {
     if (!pinsVisible) return;
     const data = pinData(countries);
     globe.htmlElementsData(data);
-    globe.pointsData(data);
   }
 
   function focusCountry(countryId) {
