@@ -20,6 +20,8 @@ window.WorldPlanner = (() => {
   let open = false;
   let pendingPlace = null;
   let view = "list"; // list | create | trip
+  let highlightSegId = null;
+  let keepSegFormOpen = false;
 
   function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
@@ -403,8 +405,8 @@ window.WorldPlanner = (() => {
       <div class="trip-country-row" data-row="${idx}">
         <select class="new-seg-country pill-select">${opts}</select>
         <input class="new-seg-city pill-select" placeholder="City" value="${esc(row.city || "")}" />
-        <input class="new-seg-start pill-select" type="date" value="${esc(row.startDate || "")}" aria-label="Start" />
-        <input class="new-seg-end pill-select" type="date" value="${esc(row.endDate || "")}" aria-label="End" />
+        <label class="field field-inline"><span class="muted">Start</span><input class="new-seg-start pill-select" type="date" value="${esc(row.startDate || "")}" /></label>
+        <label class="field field-inline"><span class="muted">End</span><input class="new-seg-end pill-select" type="date" value="${esc(row.endDate || "")}" /></label>
         <button type="button" class="btn btn-ghost btn-sm row-remove" title="Remove">✕</button>
       </div>`;
   }
@@ -490,7 +492,7 @@ window.WorldPlanner = (() => {
         `<option value="${esc(cc.id)}" ${cc.id === s.countryId ? "selected" : ""}>${esc(cc.name)}</option>`
       ).join("");
       const photoStyle = segmentPhotoStyle(s);
-      return `<article class="segment-card card segment-editable" id="seg-${esc(s.id)}" data-seg-id="${esc(s.id)}">
+      return `<article class="segment-card card segment-editable${s.id === highlightSegId ? " segment-card-highlight" : ""}" id="seg-${esc(s.id)}" data-seg-id="${esc(s.id)}">
         <div class="segment-photo" style="${photoStyle}">
           <div class="segment-photo-overlay">
             ${c ? `<img class="segment-flag" src="${CountryMeta.flagUrl(c.iso, 24)}" alt="" width="28" height="20"/>` : ""}
@@ -643,13 +645,13 @@ window.WorldPlanner = (() => {
         <h3>Route — countries &amp; cities</h3>
         <div class="segment-grid">${renderEditableSegments(state, trip) || '<p class="muted">No segments</p>'}</div>
       </section>
-      <details class="planner-add-seg-form card">
+      <details class="planner-add-seg-form card"${keepSegFormOpen ? " open" : ""}>
         <summary>Add city segment</summary>
         <div class="planner-grid" style="margin-top:0.65rem">
           <select id="seg-country" class="pill-select">${countryOpts}</select>
           <input id="seg-city" class="pill-select" placeholder="City" />
-          <input id="seg-start" type="date" class="pill-select" />
-          <input id="seg-end" type="date" class="pill-select" />
+          <label class="field field-inline"><span class="muted">Start</span><input id="seg-start" type="date" class="pill-select" /></label>
+          <label class="field field-inline"><span class="muted">End</span><input id="seg-end" type="date" class="pill-select" /></label>
           <button type="button" class="btn btn-secondary btn-sm" id="seg-save">Add segment</button>
         </div>
       </details>
@@ -709,6 +711,26 @@ window.WorldPlanner = (() => {
     return state;
   }
 
+  function openTripView(state, { scroll, toast: toastMsg, flush } = {}) {
+    view = "trip";
+    if (flush) WorldApp.persistPlanner({ flush: true, skipPlannerRender: true });
+    else WorldApp.persistPlanner({ skipPlannerRender: true });
+    render(state);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const body = document.querySelector(".planner-body");
+        if (scroll && body) {
+          const el = typeof scroll === "string" ? document.querySelector(scroll) : scroll;
+          if (el) {
+            const top = el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 8;
+            body.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+          }
+        }
+      });
+    });
+    if (toastMsg) WorldApp.toast(toastMsg);
+  }
+
   function refreshPlannerUI({ scroll, close, toast: toastMsg } = {}) {
     if (close) {
       view = "list";
@@ -717,17 +739,23 @@ window.WorldPlanner = (() => {
       return;
     }
     render(WorldApp.getState());
+    keepSegFormOpen = false;
     requestAnimationFrame(() => {
-      const body = document.querySelector(".planner-body");
-      if (scroll && body) {
-        const el = typeof scroll === "string" ? document.querySelector(scroll) : scroll;
-        if (el) {
-          const top = el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 8;
-          body.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      requestAnimationFrame(() => {
+        const body = document.querySelector(".planner-body");
+        if (scroll && body) {
+          const el = typeof scroll === "string" ? document.querySelector(scroll) : scroll;
+          if (el) {
+            const top = el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 8;
+            body.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+            if (highlightSegId) {
+              setTimeout(() => { highlightSegId = null; }, 2400);
+            }
+          }
+        } else if (body) {
+          body.scrollTop = 0;
         }
-      } else if (body) {
-        body.scrollTop = 0;
-      }
+      });
     });
     if (toastMsg) WorldApp.toast(toastMsg);
   }
@@ -789,8 +817,7 @@ window.WorldPlanner = (() => {
     document.querySelectorAll("[data-open-trip]").forEach((btn) => {
       btn.addEventListener("click", () => {
         setActiveTrip(state, btn.dataset.openTrip);
-        view = "trip";
-        render(state);
+        openTripView(state, { scroll: "#planner-route" });
       });
     });
 
@@ -826,9 +853,9 @@ window.WorldPlanner = (() => {
       for (const s of segments) {
         if (!s.startDate || !s.endDate) return WorldApp.toast("Each country needs start and end dates", "warn");
       }
-      createTrip(state, { name, segments });
-      view = "trip";
-      savePlanner({ flush: true, scroll: "#planner-route", toast: "Trip created" });
+      const trip = createTrip(state, { name, segments });
+      setActiveTrip(state, trip.id);
+      openTripView(state, { flush: true, scroll: "#planner-route", toast: "Trip created" });
     });
 
     $("planner-new-trip")?.addEventListener("click", () => {
@@ -893,11 +920,11 @@ window.WorldPlanner = (() => {
       const endDate = $("seg-end")?.value;
       if (!countryId) return WorldApp.toast("Pick a country", "warn");
       const segId = addSegment(state, trip.id, { countryId, city, startDate, endDate });
+      highlightSegId = segId;
+      keepSegFormOpen = true;
       if ($("seg-city")) $("seg-city").value = "";
       if ($("seg-start")) $("seg-start").value = "";
       if ($("seg-end")) $("seg-end").value = "";
-      const form = document.querySelector(".planner-add-seg-form");
-      if (form) form.open = false;
       savePlanner({ scroll: segId ? `#seg-${segId}` : "#planner-route", toast: "Segment added" });
     });
 

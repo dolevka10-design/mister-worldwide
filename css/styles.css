@@ -630,7 +630,36 @@ html, body {
 .import-status { font-size: 0.82rem; margin-top: 0.5rem; }
 
 /* Planner polish */
-.planner-empty { padding: 1rem; margin-bottom: 1rem; }
+.planner-empty { padding: 1rem; margin-bottom: 1rem; width: 100%; box-sizing: border-box; }
+.field-inline { margin-bottom: 0; gap: 0.25rem; }
+.field-inline span { font-size: 0.72rem; }
+.segment-card-highlight {
+  outline: 2px solid var(--accent);
+  box-shadow: 0 0 0 4px rgba(124, 240, 255, 0.15);
+  animation: segment-pulse 1.2s ease-out 2;
+}
+@keyframes segment-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(124, 240, 255, 0.35); }
+  100% { box-shadow: 0 0 0 10px rgba(124, 240, 255, 0); }
+}
+input[type="date"].pill-select,
+.planner-body input[type="date"],
+.trip-country-row input[type="date"] {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  line-height: 1.25;
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+  color-scheme: dark;
+  -webkit-appearance: none;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  box-sizing: border-box;
+}
+input[type="date"].pill-select::-webkit-date-and-time-value { text-align: left; min-height: 1.25em; }
 .planner-empty h3 { margin: 0 0 0.35rem; font-size: 1rem; }
 .planner-trip-bar { padding: 0.65rem 0.75rem; margin-bottom: 0.65rem; }
 .planner-trip-bar label { font-size: 0.72rem; display: block; margin-bottom: 0.25rem; }

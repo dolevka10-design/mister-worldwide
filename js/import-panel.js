@@ -42,8 +42,9 @@ window.WorldImportPanel = (() => {
           </section>
         ` : activeTab === "url" ? `
           <section class="import-section">
-            <p class="muted assist-sub">Paste one or more Google Maps place URLs (one per line). Coordinates are read from the link when possible; otherwise the place is geocoded.</p>
-            <textarea id="import-url-paste" class="import-paste" rows="6" placeholder="https://maps.google.com/..."></textarea>
+            <p class="muted assist-sub">One per line: URL only, or <strong>Place name | City | Country | URL</strong>. Short links are resolved when possible; otherwise name + city + country are geocoded.</p>
+            <textarea id="import-url-paste" class="import-paste" rows="6" placeholder="Eiffel Tower | Paris | France | https://maps.google.com/...
+https://maps.app.goo.gl/..."></textarea>
             <button type="button" class="btn btn-primary btn-sm" id="import-url-btn">Import URLs</button>
             <p class="import-status muted" id="import-url-result"></p>
           </section>
