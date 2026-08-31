@@ -40,6 +40,14 @@ Keys sync via Firestore `assistantChats/{uid}`.
 
 Travel planner trips sync in `worldData/{uid}.planner` alongside places and countries.
 
+### Import Google Maps CSV
+
+1. Open **Planner → Import Maps**
+2. Paste exported CSV (`Name,Description,Latitude,Longitude,Url`)
+3. Description should be `City | Country | URL` — new countries are created automatically
+
+Or use the AI assistant: `import_google_maps_csv` tool with pasted `csv_text`.
+
 ## 5. Mobile
 
 The app is a responsive PWA-ready SPA. Add to home screen on iOS/Android after deploy.

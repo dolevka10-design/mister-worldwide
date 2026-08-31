@@ -1,12 +1,20 @@
-/** Place categorization — mirrors build-data.js rules for runtime edits */
+/** Place categorization — fine-grained rules from name + description */
 window.PlaceCategorize = (() => {
   const RULES = [
+    { cat: "pizza", re: /\b(pizza|pizzeria|neapolitan|margherita|pepperoni)\b/i },
+    { cat: "burger", re: /\b(burger|hamburger|cheeseburger|smash burger|shake shack|in-n-out|five guys)\b/i },
     { cat: "bagel", re: /\b(bagel|bagels)\b/i },
-    { cat: "asian_restaurant", re: /\b(asian|chinese|japanese|korean|thai|vietnamese|dim sum|pho|sushi|ramen|izakaya|yakitori|hotpot|dumpling|bibimbap|pad thai|udon|soba|curry house|wok)\b/i },
-    { cat: "italian_restaurant", re: /\b(italian|pasta|trattoria|osteria|pizzeria|neapolitan|risotto|gelato shop)\b/i },
-    { cat: "french_restaurant", re: /\b(french|brasserie|bistro|crêperie|creperie|boulangerie)\b/i },
+    { cat: "sushi", re: /\b(sushi|sashimi|nigiri|omakase|maki)\b/i },
+    { cat: "ramen", re: /\b(ramen|tonkotsu|shoyu|miso ramen)\b/i },
+    { cat: "taco", re: /\b(taco|taqueria|burrito|quesadilla|mexican grill)\b/i },
+    { cat: "vegan", re: /\b(vegan|plant[- ]based|vegetarian restaurant)\b/i },
+    { cat: "dim_sum", re: /\b(dim sum|dumpling|xiaolongbao|bao bun|gyoza)\b/i },
+    { cat: "indian", re: /\b(indian|curry house|tandoori|biryani|masala|naan)\b/i },
+    { cat: "asian_restaurant", re: /\b(asian|chinese|japanese|korean|thai|vietnamese|pho|izakaya|yakitori|hotpot|bibimbap|pad thai|udon|soba|wok|teriyaki)\b/i },
+    { cat: "italian_restaurant", re: /\b(italian|pasta|trattoria|osteria|risotto)\b/i },
+    { cat: "french_restaurant", re: /\b(french|brasserie|bistro|crêperie|creperie)\b/i },
     { cat: "middle_eastern", re: /\b(shawarma|falafel|hummus|kebab|mezze|lebanese|israeli|turkish grill)\b/i },
-    { cat: "seafood", re: /\b(seafood|oyster|crab|lobster|fish market|sashimi bar)\b/i },
+    { cat: "seafood", re: /\b(seafood|oyster|crab|lobster|fish market)\b/i },
     { cat: "steakhouse", re: /\b(steakhouse|steak house|chophouse|bbq|barbecue|smokehouse)\b/i },
     { cat: "museum", re: /\b(museum|gallery|exhibit|memorial)\b/i },
     { cat: "monument", re: /\b(monument|statue|obelisk|mausoleum)\b/i },
@@ -16,9 +24,9 @@ window.PlaceCategorize = (() => {
     { cat: "beach", re: /\b(beach|coast|shore|bay|cove)\b/i },
     { cat: "street_food", re: /\b(street food|food stall|night market|hawker|food court)\b/i },
     { cat: "market", re: /\b(farmers market|food market|bazaar|souk|mercado)\b/i },
-    { cat: "bakery", re: /\b(bakery|patisserie|pastry|boulangerie|donut|doughnut)\b/i },
+    { cat: "bakery", re: /\b(bakery|patisserie|pastry|boulangerie|donut|doughnut|croissant)\b/i },
     { cat: "cafe", re: /\b(cafe|café|coffee|espresso|starbucks|tea house)\b/i },
-    { cat: "dessert", re: /\b(dessert|ice cream|gelato|sweets|chocolate|cupcake|waffle)\b/i },
+    { cat: "dessert", re: /\b(dessert|ice cream|gelato|sweets|chocolate|cupcake|waffle|macaron)\b/i },
     { cat: "bar", re: /\b(bar|pub|tavern|cocktail|speakeasy|wine bar)\b/i },
     { cat: "nightlife", re: /\b(club|nightclub|disco|lounge|karaoke)\b/i },
     { cat: "brewery", re: /\b(brewery|brewpub|distillery|winery|vineyard)\b/i },
@@ -35,42 +43,22 @@ window.PlaceCategorize = (() => {
   ];
 
   const LABELS = {
-    place: "Places",
-    bagel: "Bagels",
-    asian_restaurant: "Asian Restaurants",
-    italian_restaurant: "Italian Restaurants",
-    french_restaurant: "French Restaurants",
-    middle_eastern: "Middle Eastern",
-    seafood: "Seafood",
-    steakhouse: "Steak & BBQ",
-    museum: "Museums",
-    monument: "Monuments",
-    skyscraper: "Skyscrapers & Towers",
-    amusement: "Amusement Parks",
-    park: "Parks & Nature",
-    beach: "Beaches",
-    restaurant: "Restaurants",
-    street_food: "Street Food",
-    market: "Markets",
-    bakery: "Bakeries",
-    cafe: "Cafés & Coffee",
-    dessert: "Desserts & Sweets",
-    bar: "Bars",
-    nightlife: "Nightlife & Clubs",
-    brewery: "Breweries & Wineries",
-    shopping: "Shopping",
-    temple: "Temples & Churches",
-    landmark: "Landmarks",
-    viewpoint: "Viewpoints",
-    zoo: "Zoos & Aquariums",
-    stadium: "Stadiums & Sports",
-    show: "Shows & Entertainment",
-    hotel: "Hotels & Lodging",
-    transport: "Transport",
+    place: "Places", pizza: "Pizza", burger: "Burgers", bagel: "Bagels", sushi: "Sushi",
+    ramen: "Ramen", taco: "Tacos & Mexican", vegan: "Vegan & Vegetarian", dim_sum: "Dim Sum & Dumplings",
+    indian: "Indian", asian_restaurant: "Asian Restaurants", italian_restaurant: "Italian Restaurants",
+    french_restaurant: "French Restaurants", middle_eastern: "Middle Eastern", seafood: "Seafood",
+    steakhouse: "Steak & BBQ", museum: "Museums", monument: "Monuments", skyscraper: "Skyscrapers & Towers",
+    amusement: "Amusement Parks", park: "Parks & Nature", beach: "Beaches", restaurant: "Restaurants",
+    street_food: "Street Food", market: "Markets", bakery: "Bakeries", cafe: "Cafés & Coffee",
+    dessert: "Desserts & Sweets", bar: "Bars", nightlife: "Nightlife & Clubs", brewery: "Breweries & Wineries",
+    shopping: "Shopping", temple: "Temples & Churches", landmark: "Landmarks", viewpoint: "Viewpoints",
+    zoo: "Zoos & Aquariums", stadium: "Stadiums & Sports", show: "Shows & Entertainment",
+    hotel: "Hotels & Lodging", transport: "Transport",
   };
 
   const EAT_CATS = new Set([
-    "bagel", "asian_restaurant", "italian_restaurant", "french_restaurant", "middle_eastern",
+    "pizza", "burger", "bagel", "sushi", "ramen", "taco", "vegan", "dim_sum", "indian",
+    "asian_restaurant", "italian_restaurant", "french_restaurant", "middle_eastern",
     "seafood", "steakhouse", "restaurant", "street_food", "market", "bakery", "cafe", "dessert",
   ]);
 
@@ -90,29 +78,21 @@ window.PlaceCategorize = (() => {
     return "Other";
   }
 
-  function allLabels() {
-    return { ...LABELS };
-  }
-
-  function isEatCategory(cat) {
-    return EAT_CATS.has(cat);
-  }
+  function isEatCategory(cat) { return EAT_CATS.has(cat); }
 
   function defaultSlot(cat) {
-    if (cat === "bagel" || cat === "bakery" || cat === "cafe") return "breakfast";
-    if (cat === "asian_restaurant" || cat === "street_food" || cat === "market") return "lunch";
+    if (["bagel", "bakery", "cafe"].includes(cat)) return "breakfast";
+    if (["pizza", "burger", "taco", "ramen", "sushi", "dim_sum", "street_food", "market"].includes(cat)) return "lunch";
     if (EAT_CATS.has(cat)) return "dinner";
-    if (cat === "bar" || cat === "nightlife" || cat === "brewery") return "drinks";
+    if (["bar", "nightlife", "brewery"].includes(cat)) return "drinks";
     if (cat === "dessert") return "dessert";
     if (cat === "show") return "show";
     if (cat === "hotel") return "hotel";
     if (cat === "transport") return "transport";
-    if (cat === "museum" || cat === "landmark" || cat === "monument" || cat === "viewpoint" || cat === "temple") return "activity";
-    if (cat === "park" || cat === "beach" || cat === "amusement" || cat === "zoo") return "afternoon";
+    if (["museum", "landmark", "monument", "viewpoint", "temple"].includes(cat)) return "activity";
+    if (["park", "beach", "amusement", "zoo"].includes(cat)) return "afternoon";
     return "activity";
   }
 
-  return {
-    categorize, label, LABELS, parseCity, allLabels, isEatCategory, defaultSlot, RULES,
-  };
+  return { categorize, label, LABELS, parseCity, allLabels: () => ({ ...LABELS }), isEatCategory, defaultSlot, RULES };
 })();

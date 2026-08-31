@@ -321,6 +321,32 @@
         required: ["day"],
       },
     },
+    {
+      name: "planner_add_segment",
+      description: "Add a city/country segment with dates to an existing trip (multi-city / multi-country).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          country: { type: "STRING" },
+          city: { type: "STRING" },
+          start_date: { type: "STRING" },
+          end_date: { type: "STRING" },
+          trip_id: { type: "STRING" },
+        },
+        required: ["country", "city", "start_date", "end_date"],
+      },
+    },
+    {
+      name: "import_google_maps_csv",
+      description: "Import Google My Maps CSV paste (Name,Description,Latitude,Longitude,Url). Creates countries/cities/categories automatically.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          csv_text: { type: "STRING", description: "Full CSV including header row" },
+        },
+        required: ["csv_text"],
+      },
+    },
   ];
 
   function $(id) {
@@ -750,8 +776,8 @@
       `You are helping ${name} (${who}), an allowlisted user.`,
       "Data is PRIVATE to this signed-in user. You manage countries, Google Maps saved places on a 3D globe, and Travel Planner trips.",
       "Planner slots: breakfast, brunch, lunch, afternoon, dinner, drinks, dessert, show, activity, hotel, transport.",
-      "Use planner_create_trip, planner_suggest_day (prefer use_ai:false for low tokens), planner_add_to_day, get_planner_snapshot.",
-      "Categories include: bagel, asian_restaurant, italian_restaurant, museum, landmark, park, beach, restaurant, street_food, cafe, bar, hotel, show, transport, and more.",
+      "Use planner_create_trip, planner_add_segment, planner_suggest_day (prefer use_ai:false), planner_add_to_day, get_planner_snapshot, import_google_maps_csv.",
+      "Categories include: pizza, burger, sushi, ramen, bagel, museum, landmark, park, and more.",
       "Places are grouped by country and city. CSV format: Name,Description,Latitude,Longitude,Url.",
       "ALWAYS use tools to read or change data — never invent places or countries.",
       "If ambiguous, ask a short clarifying question BEFORE mutating.",
@@ -1046,6 +1072,40 @@
           name: s.name, slot: s.slot, reason: s.reason, placeId: s.placeId,
         })),
       };
+    }
+
+    if (name === "planner_add_segment") {
+      const state = api.getState();
+      const countryId = resolveCountryId(args.country, state);
+      if (!countryId) return { ok: false, error: "Country not found" };
+      const trip = args.trip_id
+        ? WorldPlanner.ensurePlanner(state).trips.find((t) => t.id === args.trip_id)
+        : WorldPlanner.getActiveTrip(state);
+      if (!trip) return { ok: false, error: "No active trip" };
+      snapshot(`Add segment ${args.city}`);
+      WorldPlanner.addSegment(state, trip.id, {
+        countryId, city: args.city, startDate: args.start_date, endDate: args.end_date,
+      });
+      persistRefresh(state);
+      return { ok: true, segments: trip.segments.length };
+    }
+
+    if (name === "import_google_maps_csv") {
+      const state = api.getState();
+      if (!args.csv_text) return { ok: false, error: "csv_text required" };
+      snapshot("Import Google Maps CSV");
+      try {
+        const r = WorldMapsImport.importText(state, args.csv_text);
+        persistRefresh(state);
+        return {
+          ok: true,
+          added: r.added.length,
+          skipped: r.skipped.length,
+          sample: r.added.slice(0, 5).map((p) => ({ name: p.name, city: p.city, category: p.category })),
+        };
+      } catch (e) {
+        return { ok: false, error: String(e.message || e) };
+      }
     }
 
     return { ok: false, error: `Unknown tool: ${name}` };

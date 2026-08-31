@@ -1,79 +1,55 @@
 # Mister Worldwide
 
-Interactive **3D travel globe** with your Google Maps saved places, organized by country, city, and fine-tuned category — plus an AI assistant and **Travel Planner** for day-by-day trips.
+Interactive **3D travel globe** with Google Maps saved places, fine-grained categories, **Travel Planner** (multi-city / multi-country), and **Maps import**.
 
-**Live:** Deploy to [Netlify](https://www.netlify.com/) (see [SETUP.md](SETUP.md))
+**Live:** [Netlify](https://www.netlify.com/) — see [SETUP.md](SETUP.md)
 
 ## Features
 
-- **3D globe** — textured Earth with country flag pins at geographic centers; steady or auto-rotate
-- **Country strip** — horizontal scroll bar with all countries (touch + arrow scroll on mobile)
-- **Place browser** — filter by city, category, search; sort by name/city/category; group by category, city, or flat list
-- **Fine-tuned categories** — bagels, Asian/Italian restaurants, museums, landmarks, parks, bars, hotels, shows, and more
-- **Travel Planner** — pick country & city, plan multi-day trips with breakfast/lunch/dinner/activity slots; quick local or compact AI suggestions
-- **AI assistant** — Gemini / Groq / OpenRouter with tool-calling (places, countries, planner, CSV import)
-- **Google sign-in** — Firebase Auth with email allowlist
-- **Cloud sync** — Firestore per-user data + assistant chat + planner trips
-- **Mobile-ready** — compact topbar, bottom-sheet country panel & planner, safe-area insets
-- **Import / Export** — JSON full backup, CSV per country (Google My Maps compatible)
+- **Mobile-first UI** — compact topbar, full-screen globe, bottom-sheet panels on phone
+- **3D globe** — flag pins, steady or auto-rotate
+- **Country strip** — touch scroll + arrows
+- **Fine-grained categories** — pizza, burgers, sushi, ramen, bagels, museums, landmarks, parks, etc.
+- **Place browser** — filter by city & category, sort, group by category/city/list
+- **Travel Planner** — multi-city & multi-country trips with date ranges per segment; day-by-day slots; local + AI suggestions
+- **Import Maps tab** — paste Google My Maps CSV; auto-creates countries, cities, categories
+- **AI assistant** — Gemini / Groq / OpenRouter with tool-calling
+- **Cloud sync** — Firestore per-user data + planner + assistant chat
+
+## Google Maps import
+
+In **Planner → Import Maps**, paste CSV:
+
+```text
+Name,Description,Latitude,Longitude,Url
+Joe's Pizza,"Rome | Italy | https://...",41.89,12.49,https://...
+```
+
+Or ask the AI: *"Import this CSV into my globe: Name,Description,..."*
+
+## Travel Planner
+
+1. **Planner** → create trip with start/end dates
+2. **+ City** to add segments (country, city, date range)
+3. Each day uses places from that segment's city
+4. **Quick suggest** (zero tokens) or **AI suggest** per day
+5. **+ Trip** on any place in a country page
 
 ## Data
-
-Seed data is built from `want-to-go-by-country/by-country-mymaps/*.csv`:
 
 ```bash
 node scripts/build-data.js path/to/by-country-mymaps
 ```
 
-Output: `data/places.json` (~6,287 places across 37 countries). Categories are refined at runtime via `js/categorize.js`.
+~6,287 places / 37 countries in `data/places.json`. Categories refined at runtime via `js/categorize.js`.
 
-## Project structure
+## Quick start
 
-```
-mister-worldwide/
-├── index.html          # SPA shell
-├── css/styles.css      # Dark theme, mobile responsive
-├── data/places.json    # Compiled seed data
-├── js/
-│   ├── globe.js        # globe.gl 3D map + pins
-│   ├── store.js        # State + CSV import/export
-│   ├── categorize.js   # Fine-tuned place categories
-│   ├── planner.js      # Travel planner (trips, days, suggestions)
-│   ├── app.js          # UI + auth gate
-│   ├── cloud.js        # Firebase sync
-│   ├── assistant.js    # AI tool-calling agent
-│   └── ...
-├── netlify/functions/llm.js   # Groq/OpenRouter proxy (compact AI for planner)
-├── firestore.rules
-└── SETUP.md            # Firebase + Netlify deploy guide
+```bash
+npx serve .
 ```
 
-## Quick start (local)
-
-1. Serve the folder (any static server):
-
-   ```bash
-   npx serve .
-   ```
-
-2. Open `http://localhost:3000` — works in **local mode** without Firebase.
-
-3. For cloud sync + Google login, follow [SETUP.md](SETUP.md).
-
-## Travel Planner
-
-1. Tap **Planner** in the top bar (or ask the AI assistant).
-2. Create a trip: pick country, city, number of days.
-3. Use **Quick suggest** (local, zero tokens) or **AI suggest day** (compact ~280 token call).
-4. Add places from any country page with **+ Trip** (pick day + slot: breakfast, drinks, show, etc.).
-5. Ask the AI: *"Plan 3 days in Tokyo with museums and ramen"* — it uses `planner_create_trip`, `planner_suggest_day`, `planner_add_to_day`.
-
-## AI assistant examples
-
-- "How many Asian restaurants do I have in Japan?"
-- "Add the Eiffel Tower to France"
-- "Create a 4-day trip in Rome and suggest day 1"
-- "Add place p123 to day 2 dinner with note: romantic dinner"
+Open `http://localhost:3000` — local mode works without Firebase. For cloud sync, see [SETUP.md](SETUP.md).
 
 ## License
 
