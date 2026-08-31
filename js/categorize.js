@@ -1,6 +1,11 @@
 /** Place categorization — fine-grained rules from name + description */
 window.PlaceCategorize = (() => {
   const RULES = [
+    { cat: "brunch", re: /\b(brunch|brunch spot|eggs benedict|shakshuka)\b/i },
+    { cat: "sandwich", re: /\b(sandwich|deli|sub shop|panini|hoagie|banh mi)\b/i },
+    { cat: "fish_chips", re: /\b(fish and chips|fish & chips|chippy)\b/i },
+    { cat: "wine_bar", re: /\b(wine bar|enoteca|wine tasting)\b/i },
+    { cat: "cocktail_bar", re: /\b(cocktail bar|mixology|martini)\b/i },
     { cat: "pizza", re: /\b(pizza|pizzeria|neapolitan|margherita|pepperoni)\b/i },
     { cat: "burger", re: /\b(burger|hamburger|cheeseburger|smash burger|shake shack|in-n-out|five guys)\b/i },
     { cat: "bagel", re: /\b(bagel|bagels)\b/i },
@@ -43,7 +48,9 @@ window.PlaceCategorize = (() => {
   ];
 
   const LABELS = {
-    place: "Places", pizza: "Pizza", burger: "Burgers", bagel: "Bagels", sushi: "Sushi",
+    place: "Places", brunch: "Brunch", sandwich: "Sandwiches & Delis", fish_chips: "Fish & Chips",
+    wine_bar: "Wine Bars", cocktail_bar: "Cocktail Bars",
+    pizza: "Pizza", burger: "Burgers", bagel: "Bagels", sushi: "Sushi",
     ramen: "Ramen", taco: "Tacos & Mexican", vegan: "Vegan & Vegetarian", dim_sum: "Dim Sum & Dumplings",
     indian: "Indian", asian_restaurant: "Asian Restaurants", italian_restaurant: "Italian Restaurants",
     french_restaurant: "French Restaurants", middle_eastern: "Middle Eastern", seafood: "Seafood",
@@ -58,6 +65,7 @@ window.PlaceCategorize = (() => {
 
   const EAT_CATS = new Set([
     "pizza", "burger", "bagel", "sushi", "ramen", "taco", "vegan", "dim_sum", "indian",
+    "brunch", "sandwich", "fish_chips", "wine_bar", "cocktail_bar",
     "asian_restaurant", "italian_restaurant", "french_restaurant", "middle_eastern",
     "seafood", "steakhouse", "restaurant", "street_food", "market", "bakery", "cafe", "dessert",
   ]);

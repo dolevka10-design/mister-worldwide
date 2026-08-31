@@ -58,23 +58,35 @@ window.WorldMapsImport = (() => {
 
   function resolveCountryId(state, countryName, lat, lng) {
     const n = norm(countryName);
-    if (!n) return null;
-    let c = (state.countries || []).find((x) => norm(x.name) === n || norm(x.id) === slug(countryName));
-    if (c) return c.id;
-    c = (state.countries || []).find((x) => norm(x.name).includes(n) || n.includes(norm(x.name)));
-    if (c) return c.id;
-    const id = slug(countryName);
+    if (n && n !== "unknown") {
+      let c = (state.countries || []).find((x) => norm(x.name) === n || norm(x.id) === slug(countryName));
+      if (c) return { id: c.id, created: false };
+      c = (state.countries || []).find((x) => norm(x.name).includes(n) || n.includes(norm(x.name)));
+      if (c) return { id: c.id, created: false };
+    }
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      let best = null;
+      let bestD = Infinity;
+      for (const c of state.countries || []) {
+        if (c.lat == null || c.lng == null) continue;
+        const d = (c.lat - lat) ** 2 + (c.lng - lng) ** 2;
+        if (d < bestD) { bestD = d; best = c; }
+      }
+      if (best && bestD < 400) return { id: best.id, created: false };
+    }
+    const name = (countryName && n !== "unknown") ? countryName.trim() : "Unknown";
+    const id = slug(name === "Unknown" ? `place-${lat?.toFixed(1)}-${lng?.toFixed(1)}` : name);
     const iso = id.slice(0, 2) || "xx";
     state.countries.push({
       id,
-      name: countryName.trim(),
+      name: name === "Unknown" ? `Region ${lat?.toFixed(1)},${lng?.toFixed(1)}` : name,
       iso,
       lat: Number(lat) || 0,
       lng: Number(lng) || 0,
       placeCount: 0,
     });
     CountryMeta.init(state.countries);
-    return id;
+    return { id, created: true };
   }
 
   function importText(state, text, { dedupe = true } = {}) {
@@ -98,13 +110,12 @@ window.WorldMapsImport = (() => {
       if (dedupe && existing.has(key)) { skipped.push(name); continue; }
 
       const { city, country: countryFromDesc, url: urlFromDesc } = parseDesc(desc);
-      const countryName = countryFromDesc || "Unknown";
-      const countryId = resolveCountryId(state, countryName, lat, lng);
+      const countryName = countryFromDesc || "";
+      const { id: countryId, created } = resolveCountryId(state, countryName, lat, lng);
       if (!countryId) continue;
 
       const country = state.countries.find((c) => c.id === countryId);
-      const wasNew = newCountries.has(countryId);
-      if (!state.countries.find((c) => c.id === countryId && c.placeCount > 0)) newCountries.add(countryId);
+      if (created) newCountries.add(countryId);
 
       const place = {
         id: WorldStore.nextPlaceId(state),

@@ -129,7 +129,8 @@ html, body {
   gap: 0.5rem;
   min-width: 0;
 }
-.topbar-row-main { align-items: flex-start; }
+.brand-block { min-width: 0; flex: 1; }
+.topbar-row-main .brand-block { padding-right: 0.25rem; }
 .topbar-row-meta {
   flex-wrap: wrap;
   gap: 0.35rem 0.65rem;
@@ -328,10 +329,17 @@ html, body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .country-panel.open { transform: translateY(0); }
-.panel-header { padding: 0.65rem 0.85rem; }
-.panel-header h2 { margin: 0; font-size: 1.1rem; }
-.panel-flag { border-radius: 4px; object-fit: cover; }
-.panel-close { margin-left: auto; }
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panel-header h2 { margin: 0; font-size: 1.1rem; flex: 1; min-width: 0; }
+.panel-flag { border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+.panel-close { margin-left: auto; flex-shrink: 0; }
 .panel-toolbar-wrap {
   border-bottom: 1px solid var(--border);
 }
@@ -648,6 +656,9 @@ html, body {
 .assist-head-actions .btn-sm { padding: 0.4rem 0.35rem; font-size: 0.72rem; }
 
 @media (max-width: 768px) {
+  .filter-row { grid-template-columns: 1fr; }
+  .view-toggle .tab { font-size: 0.75rem; padding: 0.38rem 0.4rem; }
+  .planner-grid { grid-template-columns: 1fr; }
   .assist-head {
     flex-direction: column;
     align-items: stretch;
