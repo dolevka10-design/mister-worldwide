@@ -88,6 +88,17 @@ window.WorldApp = (() => {
     el.querySelectorAll("[data-country]").forEach((btn) => {
       btn.addEventListener("click", () => selectCountry(btn.dataset.country));
     });
+    updateCountryStripArrows();
+  }
+
+  function updateCountryStripArrows() {
+    const list = $("country-list");
+    const left = $("country-scroll-left");
+    const right = $("country-scroll-right");
+    if (!list || !left || !right) return;
+    const max = list.scrollWidth - list.clientWidth;
+    left.disabled = list.scrollLeft <= 2;
+    right.disabled = max <= 2 || list.scrollLeft >= max - 2;
   }
 
   function selectCountry(countryId) {
@@ -97,6 +108,7 @@ window.WorldApp = (() => {
     const q = $("place-search");
     if (q) q.value = "";
     WorldGlobe.focusCountry(countryId);
+    WorldGlobe.setPinsVisible?.(false);
     renderCountryList();
     renderCountryPanel();
     $("country-panel")?.classList.add("open");
@@ -173,8 +185,29 @@ window.WorldApp = (() => {
     $("btn-close-panel")?.addEventListener("click", () => {
       $("country-panel")?.classList.remove("open");
       selectedCountry = null;
+      WorldGlobe.setPinsVisible?.(true);
       renderCountryList();
     });
+
+    $("btn-toggle-filters")?.addEventListener("click", () => {
+      const wrap = $("panel-filters");
+      const btn = $("btn-toggle-filters");
+      const caret = $("filter-caret");
+      if (!wrap || !btn) return;
+      const open = wrap.classList.toggle("collapsed");
+      btn.setAttribute("aria-expanded", open ? "false" : "true");
+      if (caret) caret.textContent = open ? "▼" : "▲";
+    });
+
+    $("country-scroll-left")?.addEventListener("click", () => {
+      $("country-list")?.scrollBy({ left: -220, behavior: "smooth" });
+      setTimeout(updateCountryStripArrows, 280);
+    });
+    $("country-scroll-right")?.addEventListener("click", () => {
+      $("country-list")?.scrollBy({ left: 220, behavior: "smooth" });
+      setTimeout(updateCountryStripArrows, 280);
+    });
+    $("country-list")?.addEventListener("scroll", updateCountryStripArrows);
 
     $("view-category")?.addEventListener("click", () => {
       viewMode = "category";

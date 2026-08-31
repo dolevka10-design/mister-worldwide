@@ -54,8 +54,11 @@
 
       <main class="globe-layout">
         <aside class="sidebar">
-          <h2 class="sidebar-title">Countries</h2>
-          <div id="country-list" class="country-list"></div>
+          <div class="country-strip">
+            <button type="button" class="country-scroll-btn" id="country-scroll-left" aria-label="Scroll countries left">‹</button>
+            <div id="country-list" class="country-list"></div>
+            <button type="button" class="country-scroll-btn" id="country-scroll-right" aria-label="Scroll countries right">›</button>
+          </div>
         </aside>
         <div class="globe-wrap">
           <div class="globe-toolbar">
@@ -74,14 +77,20 @@
           </div>
           <button type="button" class="btn btn-ghost panel-close" id="btn-close-panel" aria-label="Close">✕</button>
         </header>
-        <div class="panel-toolbar">
-          <input id="place-search" type="search" placeholder="Search places…" class="search-input" />
-          <select id="category-filter" class="pill-select"></select>
-          <div class="view-toggle">
-            <button type="button" class="tab active" id="view-category">By category</button>
-            <button type="button" class="tab" id="view-city">By city</button>
+        <div class="panel-toolbar-wrap">
+          <button type="button" class="panel-toolbar-toggle" id="btn-toggle-filters" aria-expanded="true">
+            <span>Filters</span>
+            <span class="panel-toolbar-caret" id="filter-caret">▲</span>
+          </button>
+          <div class="panel-toolbar" id="panel-filters">
+            <input id="place-search" type="search" placeholder="Search places…" class="search-input" />
+            <select id="category-filter" class="pill-select"></select>
+            <div class="view-toggle">
+              <button type="button" class="tab active" id="view-category">By category</button>
+              <button type="button" class="tab" id="view-city">By city</button>
+            </div>
+            <button type="button" class="btn btn-secondary" id="btn-export-csv">Export CSV</button>
           </div>
-          <button type="button" class="btn btn-secondary" id="btn-export-csv">Export CSV</button>
         </div>
         <div id="panel-body" class="panel-body"></div>
       </aside>

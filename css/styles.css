@@ -112,32 +112,66 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
 .globe-layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
   min-height: calc(100vh - 90px);
   min-height: calc(100dvh - 90px);
 }
 .sidebar {
-  border-right: 1px solid var(--border);
-  padding: 1rem;
-  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
   background: var(--bg-elevated);
-  min-height: 0;
 }
-.sidebar-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 0.75rem; }
-.country-list { display: flex; flex-direction: column; gap: 0.35rem; min-height: 0; }
+.country-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.country-scroll-btn {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.country-scroll-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.country-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  min-width: 0;
+  flex: 1;
+}
+.country-list::-webkit-scrollbar { display: none; }
 .country-chip {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: 100%;
+  flex: 0 0 auto;
   text-align: left;
-  padding: 0.55rem 0.65rem;
+  padding: 0.5rem 0.65rem;
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   font: inherit;
+  white-space: nowrap;
 }
 .country-chip:hover, .country-chip.active { border-color: var(--border); background: var(--card); }
 .country-chip small { margin-left: auto; color: var(--muted); }
@@ -242,7 +276,7 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
   border-left: 1px solid var(--border);
   transform: translateX(100%);
   transition: transform 0.3s ease;
-  z-index: 30;
+  z-index: 45;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);
@@ -258,13 +292,33 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
 .panel-header h2 { margin: 0; font-size: 1.35rem; }
 .panel-flag { border-radius: 4px; object-fit: cover; }
 .panel-close { margin-left: auto; }
+.panel-toolbar-wrap {
+  border-bottom: 1px solid var(--border);
+}
+.panel-toolbar-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.panel-toolbar-caret { color: var(--accent); font-size: 0.75rem; }
 .panel-toolbar {
-  padding: 0.75rem 1rem;
+  padding: 0 1rem 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  border-bottom: 1px solid var(--border);
 }
+.panel-toolbar.collapsed { display: none; }
 .view-toggle { display: flex; gap: 0.35rem; }
 .tab {
   flex: 1;
@@ -400,27 +454,7 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
 .toast-error { border-color: var(--danger); color: #ffb4bc; }
 
 @media (max-width: 900px) {
-  .globe-layout { grid-template-columns: 1fr; grid-template-rows: minmax(200px, 34dvh) minmax(50dvh, 1fr); }
-  .sidebar {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    max-height: none;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  .country-list {
-    flex: 1;
-    flex-direction: column;
-    flex-wrap: nowrap;
-    overflow-x: hidden;
-    overflow-y: auto;
-    max-height: none;
-    padding-bottom: 0.25rem;
-    -webkit-overflow-scrolling: touch;
-  }
-  .country-chip { width: 100%; flex-shrink: 0; }
-  .country-panel { width: 100%; }
+  .globe-layout { grid-template-rows: auto minmax(50dvh, 1fr); }
   .globe-wrap, .globe-canvas { min-height: 50dvh; }
 }
 

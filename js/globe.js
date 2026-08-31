@@ -80,37 +80,49 @@ window.WorldGlobe = (() => {
   }
 
   function centroidOfRing(ring) {
-    let sumLat = 0;
-    let sumLng = 0;
-    let n = 0;
-    for (const coord of ring) {
-      if (!coord || coord.length < 2) continue;
-      sumLng += coord[0];
-      sumLat += coord[1];
-      n++;
+    if (!ring?.length) return null;
+    let twiceArea = 0;
+    let cx = 0;
+    let cy = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const x1 = ring[j][0];
+      const y1 = ring[j][1];
+      const x2 = ring[i][0];
+      const y2 = ring[i][1];
+      const f = x1 * y2 - x2 * y1;
+      twiceArea += f;
+      cx += (x1 + x2) * f;
+      cy += (y1 + y2) * f;
     }
-    return n ? { lat: sumLat / n, lng: sumLng / n } : null;
+    if (!twiceArea) return null;
+    return { lng: cx / (3 * twiceArea), lat: cy / (3 * twiceArea) };
+  }
+
+  function ringArea(ring) {
+    let a = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    }
+    return Math.abs(a / 2);
   }
 
   function centroidOfFeature(feat) {
     const geom = feat?.geometry;
     if (!geom) return null;
-    const rings = [];
-    if (geom.type === "Polygon") rings.push(...geom.coordinates);
-    else if (geom.type === "MultiPolygon") {
-      for (const poly of geom.coordinates) rings.push(...poly);
-    }
-    let sumLat = 0;
-    let sumLng = 0;
-    let n = 0;
-    for (const ring of rings) {
+    const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.type === "MultiPolygon" ? geom.coordinates : [];
+    let best = null;
+    let bestArea = 0;
+    for (const poly of polys) {
+      const ring = poly?.[0];
+      if (!ring?.length) continue;
+      const area = ringArea(ring);
+      if (area <= bestArea) continue;
       const c = centroidOfRing(ring);
       if (!c) continue;
-      sumLat += c.lat;
-      sumLng += c.lng;
-      n++;
+      bestArea = area;
+      best = c;
     }
-    return n ? { lat: sumLat / n, lng: sumLng / n } : null;
+    return best;
   }
 
   function buildCentroids(features) {
@@ -124,6 +136,8 @@ window.WorldGlobe = (() => {
   }
 
   function countryCenter(c) {
+    const manual = CountryMeta.pinCenterFor(c.id);
+    if (manual) return manual;
     const atlasName = CountryMeta.atlasLookupName(c.name);
     const fromAtlas = centroidsByName.get(atlasName);
     if (fromAtlas) return fromAtlas;
@@ -193,14 +207,24 @@ window.WorldGlobe = (() => {
     window.addEventListener("resize", onResize);
   }
 
+  let pinsVisible = true;
+
+  function setPinsVisible(visible) {
+    pinsVisible = !!visible;
+    if (!globe) return;
+    const data = pinsVisible ? pinData(countries) : [];
+    globe.htmlElementsData(data);
+    globe.pointsData(data);
+  }
+
   function bindControls(controls) {
     controls.enableZoom = true;
     controls.enablePan = true;
     controls.enableRotate = true;
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 170;
-    controls.maxDistance = 450;
+    controls.minDistance = 95;
+    controls.maxDistance = 420;
     applyAutoRotate();
   }
 
@@ -284,6 +308,7 @@ window.WorldGlobe = (() => {
   function updatePins(list) {
     countries = (list || countries).filter((c) => (c.placeCount || 0) > 0);
     if (!globe) return;
+    if (!pinsVisible) return;
     const data = pinData(countries);
     globe.htmlElementsData(data);
     globe.pointsData(data);
@@ -335,5 +360,6 @@ window.WorldGlobe = (() => {
     isReady,
     setAutoRotate,
     isAutoRotate: () => autoRotateEnabled,
+    setPinsVisible,
   };
 })();
