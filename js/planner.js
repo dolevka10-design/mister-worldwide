@@ -434,6 +434,17 @@ window.WorldPlanner = (() => {
     return rows;
   }
 
+  function segmentPhotoUrl(seg, country) {
+    const city = seg?.city || "city";
+    const lat = country?.lat;
+    const lng = country?.lng;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=11&size=640x240&mapnik`;
+    }
+    const seed = encodeURIComponent(city.toLowerCase().replace(/\s+/g, "-"));
+    return `https://picsum.photos/seed/${seed}/640/240`;
+  }
+
   function renderEditableSegments(state, trip) {
     const countries = WorldStore.countriesForUi(state);
     return (trip.segments || []).map((s, i) => {
@@ -441,14 +452,20 @@ window.WorldPlanner = (() => {
       const opts = countries.map((cc) =>
         `<option value="${esc(cc.id)}" ${cc.id === s.countryId ? "selected" : ""}>${esc(cc.name)}</option>`
       ).join("");
+      const photo = segmentPhotoUrl(s, c);
       return `<article class="segment-card card segment-editable" data-seg-id="${esc(s.id)}">
+        <div class="segment-photo" style="background-image:url('${photo}')">
+          <div class="segment-photo-overlay">
+            ${c ? `<img class="segment-flag" src="${CountryMeta.flagUrl(c.iso, 24)}" alt="" width="28" height="20"/>` : ""}
+            <div><strong>${esc(s.city)}</strong><span class="muted place-meta">${esc(c?.name || "Country")}</span></div>
+          </div>
+        </div>
         <div class="segment-card-head">
-          ${c ? `<img src="${CountryMeta.flagUrl(c.iso, 24)}" alt="" width="28" height="20"/>` : ""}
           <strong>Stop ${i + 1}</strong>
           <div class="segment-actions">
-            <button type="button" class="btn btn-ghost btn-sm" data-seg-up="${esc(s.id)}" ${i === 0 ? "disabled" : ""}>↑</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-seg-down="${esc(s.id)}" ${i === trip.segments.length - 1 ? "disabled" : ""}>↓</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-seg-remove="${esc(s.id)}" title="Remove segment">✕</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-seg-up="${esc(s.id)}" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-seg-down="${esc(s.id)}" ${i === trip.segments.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-seg-remove="${esc(s.id)}" title="Remove segment" aria-label="Remove">✕</button>
           </div>
         </div>
         <div class="segment-edit-grid">

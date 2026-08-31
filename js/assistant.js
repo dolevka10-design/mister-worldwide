@@ -347,6 +347,19 @@
         required: ["csv_text"],
       },
     },
+    {
+      name: "import_maps_urls",
+      description: "Import one or more Google Maps place URLs (including maps.app.goo.gl short links).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          urls: { type: "STRING", description: "Maps URLs, one per line or space-separated" },
+          country: { type: "STRING", description: "Optional country hint" },
+          city: { type: "STRING", description: "Optional city hint" },
+        },
+        required: ["urls"],
+      },
+    },
   ];
 
   function $(id) {
@@ -855,7 +868,7 @@
       `You are helping ${name} (${who}), an allowlisted user.`,
       "Data is PRIVATE to this signed-in user. You manage countries, Google Maps saved places on a 3D globe, and Travel Planner trips.",
       "Planner slots: breakfast, brunch, lunch, afternoon, dinner, drinks, dessert, show, activity, hotel, transport.",
-      "Use planner_create_trip, planner_add_segment, planner_suggest_day (prefer use_ai:false), planner_add_to_day, get_planner_snapshot, import_google_maps_csv.",
+      "Use planner_create_trip, planner_add_segment, planner_suggest_day (prefer use_ai:false), planner_add_to_day, get_planner_snapshot, import_google_maps_csv, import_maps_urls.",
       "Categories include: pizza, burger, sushi, ramen, bagel, museum, landmark, park, and more.",
       "Places are grouped by country and city. CSV format: Name,Description,Latitude,Longitude,Url.",
       "ALWAYS use tools to read or change data — never invent places or countries.",
@@ -1187,6 +1200,31 @@
       }
     }
 
+    if (name === "import_maps_urls") {
+      const state = api.getState();
+      if (!args.urls) return { ok: false, error: "urls required" };
+      snapshot("Import Google Maps URLs");
+      try {
+        const countryId = args.country ? resolveCountryId(args.country, state) : null;
+        const country = countryId ? state.countries.find((c) => c.id === countryId) : null;
+        const r = await WorldMapsImport.importMapsUrls(state, args.urls, {
+          countryId,
+          countryName: country?.name,
+          city: args.city,
+        });
+        persistRefresh(state);
+        return {
+          ok: true,
+          added: r.added.length,
+          skipped: r.skipped.length,
+          geocoded: r.geocoded || 0,
+          sample: r.added.slice(0, 5).map((p) => ({ name: p.name, city: p.city, category: p.category })),
+        };
+      } catch (e) {
+        return { ok: false, error: String(e.message || e) };
+      }
+    }
+
     return { ok: false, error: `Unknown tool: ${name}` };
   }
 
@@ -1240,20 +1278,59 @@
     return !host || host === "localhost" || host === "127.0.0.1";
   }
 
-  /** Ordered endpoints: Netlify Function → rewrite proxy → direct API */
+  /** Ordered endpoints: Netlify Function only (redirect proxies break POST on mobile). */
   function llmEndpoints(provider) {
     const p = PROVIDERS[provider];
     const urls = [];
     if (location.protocol.startsWith("http")) {
       urls.push(`/.netlify/functions/llm?provider=${encodeURIComponent(provider)}`);
     }
-    if (p?.proxyBase && !isLocalHost()) {
-      urls.push(`${p.proxyBase}/chat/completions`);
-    }
-    if (p?.directBase) {
+    if (isLocalHost() && p?.directBase) {
       urls.push(`${p.directBase}/chat/completions`);
     }
     return urls;
+  }
+
+  function cloneGeminiPart(p) {
+    if (!p || typeof p !== "object") return p;
+    const out = {};
+    if (p.text != null) out.text = p.text;
+    if (p.functionCall) {
+      out.functionCall = { ...p.functionCall };
+      if (typeof out.functionCall.args === "string") {
+        try { out.functionCall.args = JSON.parse(out.functionCall.args); } catch { /* */ }
+      }
+    }
+    if (p.functionResponse) {
+      out.functionResponse = {
+        name: p.functionResponse.name,
+        response: p.functionResponse.response ?? {},
+      };
+    }
+    if (p.thought_signature != null) out.thought_signature = p.thought_signature;
+    if (p.thoughtSignature != null) out.thoughtSignature = p.thoughtSignature;
+    return out;
+  }
+
+  function extractMapsUrlsFromText(text) {
+    const urls = [];
+    const re = /https?:\/\/[^\s<>"']+/gi;
+    for (const m of String(text || "").matchAll(re)) {
+      const u = m[0].replace(/[),.;]+$/, "");
+      if (WorldMapsImport?.isMapsUrl?.(u)) urls.push(u);
+    }
+    return [...new Set(urls)];
+  }
+
+  async function directImportMapsUrls(text) {
+    const urls = extractMapsUrlsFromText(text);
+    if (!urls.length) return null;
+    const state = window.WorldApp?.getState?.();
+    if (!state) throw new Error("App not ready");
+    const r = await WorldMapsImport.importMapsUrls(state, urls.join("\n"));
+    window.WorldApp.persist();
+    window.WorldApp.refresh();
+    return { urls, ...r };
   }
 
   function parseLlmError(data, res, rawText, label) {
@@ -1681,12 +1758,7 @@
         if (callParts.length) {
           out.push({
             role: "model",
-            parts: callParts.map((p) => ({
-              functionCall: {
-                name: p.functionCall.name,
-                args: p.functionCall.args || {},
-              },
-            })),
+            parts: callParts.map((p) => cloneGeminiPart(p)),
           });
         } else if (textParts.length) {
           out.push({
@@ -1734,6 +1806,14 @@
         return await geminiGenerateWithFallback(c);
       } catch (e) {
         const msg = String(e.message || e);
+        if (/thought_signature/i.test(msg)) {
+          chatHistory = textOnlyHistory(chatHistory);
+          if (!chatHistory.length || chatHistory[chatHistory.length - 1].role !== "user") {
+            chatHistory.push({ role: "user", parts: [{ text: userText }] });
+          }
+          contents = chatHistory.slice();
+          return geminiGenerateWithFallback(contents);
+        }
         if (!/function call turn|function response turn|must alternate/i.test(msg)) throw e;
         // Broken history (often after Groq/OpenRouter) — retry text-only
         chatHistory = textOnlyHistory(chatHistory);
@@ -1753,9 +1833,10 @@
 
       if (!calls.length) {
         finalText = text || "Done.";
+        const parts = (rawParts || []).filter((p) => p.text || p.functionCall).map((p) => cloneGeminiPart(p));
         chatHistory.push({
           role: "model",
-          parts: rawParts.length ? rawParts.filter((p) => p.text || p.functionCall) : [{ text: finalText }],
+          parts: parts.length ? parts : [{ text: finalText }],
         });
         chatHistory = sanitizeGeminiHistory(chatHistory);
         break;
@@ -1763,18 +1844,8 @@
 
       const modelParts = (rawParts || [])
         .filter((p) => p.functionCall || p.text)
-        .map((p) => {
-          if (p.functionCall) {
-            return {
-              functionCall: {
-                name: p.functionCall.name,
-                args: p.functionCall.args || {},
-              },
-            };
-          }
-          return { text: p.text };
-        });
-      const modelTurn = { role: "model", parts: modelParts.length ? modelParts : rawParts };
+        .map((p) => cloneGeminiPart(p));
+      const modelTurn = { role: "model", parts: modelParts.length ? modelParts : rawParts.map((p) => cloneGeminiPart(p)) };
       contents = contents.concat([modelTurn]);
       chatHistory.push(modelTurn);
 
@@ -2002,6 +2073,25 @@
       );
       return;
     }
+
+    const mapsUrls = extractMapsUrlsFromText(text);
+    if (mapsUrls.length) {
+      me(text);
+      try {
+        const r = await directImportMapsUrls(text);
+        const names = (r.added || []).slice(0, 3).map((p) => p.name).join(", ");
+        bot(
+          `Imported ${r.added.length} place${r.added.length === 1 ? "" : "s"} from Google Maps` +
+            `${r.geocoded ? ` (${r.geocoded} geocoded)` : ""}` +
+            `${r.skipped?.length ? ` · ${r.skipped.length} skipped as duplicates` : ""}` +
+            `${names ? `\n${names}${r.added.length > 3 ? "…" : ""}` : ""}`
+        );
+      } catch (e) {
+        bot(`Could not import Maps URL: ${e.message || e}\nTry Import → Maps URL, or paste in the country panel.`);
+      }
+      return;
+    }
+
     if (/^provider\s+(gemini|groq|openrouter|or)\s*$/i.test(text)) {
       const p = normalizeProvider(text.split(/\s+/)[1]);
       setActiveModel(p, PROVIDERS[p].models[0]);
@@ -2044,7 +2134,14 @@
       setTyping(false);
       const msg = String(e.message || e);
       if (msg === "NO_API_KEY") showKeySetup();
-      else if (/Failed to fetch|NetworkError|CORS/i.test(msg) && providerId === "groq") {
+      else if (/thought_signature/i.test(msg) && providerId === "gemini") {
+        chatHistory = textOnlyHistory(chatHistory);
+        persistLocalSession();
+        bot(
+          "Gemini tool error — chat history reset. Retry your message.\n" +
+            "Tip: use gemini-2.5-flash-lite, or paste Maps URLs directly (imports without AI)."
+        );
+      } else if (/Failed to fetch|NetworkError|CORS/i.test(msg) && providerId === "groq") {
         bot(
           "Groq blocked from this host (CORS). Redeploy Netlify (proxy), or use OpenRouter free:\n" +
             "key openrouter sk-or-…"

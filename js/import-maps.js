@@ -357,10 +357,29 @@ window.WorldMapsImport = (() => {
     return /google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl/i.test(String(text || ""));
   }
 
+  async function expandMapsUrl(url) {
+    const raw = String(url || "").trim();
+    if (!raw) return raw;
+    if (!/goo\.gl|maps\.app/i.test(raw)) return raw;
+    try {
+      const res = await fetch(`/.netlify/functions/resolve-maps?url=${encodeURIComponent(raw)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.url) return data.url;
+      }
+    } catch { /* fall through */ }
+    return raw;
+  }
+
   async function importMapsUrls(state, text, { countryId, countryName, city } = {}) {
     const lines = String(text || "").split(/\n/).map((s) => s.trim()).filter(Boolean);
-    const urls = lines.filter((l) => isMapsUrl(l) || l.startsWith("http"));
-    if (!urls.length) throw new Error("Paste one or more Google Maps URLs");
+    const rawUrls = lines.filter((l) => isMapsUrl(l) || l.startsWith("http"));
+    if (!rawUrls.length) throw new Error("Paste one or more Google Maps URLs");
+
+    const urls = [];
+    for (const u of rawUrls) {
+      urls.push(await expandMapsUrl(u));
+    }
 
     const byUrl = buildUrlIndex(state);
     const existingKeys = new Set((state.places || []).map((p) => `${norm(p.name)}|${p.lat?.toFixed(4)}|${p.lng?.toFixed(4)}`));
@@ -406,7 +425,7 @@ window.WorldMapsImport = (() => {
   }
 
   return {
-    parseCsv, importText, importTakeoutCsv, importTakeoutZip, importMapsUrls,
+    parseCsv, importText, importTakeoutCsv, importTakeoutZip, importMapsUrls, expandMapsUrl,
     urlFingerprint, nameFromUrl, hintFromFilename, geocodePlace, parseCoordsFromUrl, isMapsUrl,
   };
 })();

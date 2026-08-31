@@ -476,7 +476,37 @@ html, body {
   padding: 0.65rem 1rem;
   border-bottom: 1px solid var(--border);
 }
-.planner-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.planner-grid { display: grid; grid-template-columns: 1fr; gap: 0.45rem; }
+.planner-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
+}
+.planner-body .pill-select,
+.planner-body select,
+.planner-body input[type="date"],
+.planner-body input[type="text"],
+.planner-body input[type="url"],
+.planner-trip-bar .pill-select,
+.trip-country-row .pill-select,
+.modal-fields .pill-select,
+.modal-fields input {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.planner-controls-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+.planner-controls-inline .pill-select { flex: 1 1 100%; min-width: 0; }
+.planner-trip-bar .btn { flex: 0 0 auto; min-height: 44px; }
 .planner-actions {
   display: flex;
   gap: 0.5rem;
@@ -631,10 +661,38 @@ html, body {
   padding: 0 0.3rem;
   line-height: 1.3;
 }
-.segment-grid { display: grid; gap: 0.5rem; }
-.segment-card { padding: 0.65rem 0.75rem; }
-.segment-card-head { display: flex; align-items: center; gap: 0.5rem; }
-.segment-dates { margin: 0.35rem 0 0; font-size: 0.78rem; }
+.segment-grid { display: grid; gap: 0.65rem; }
+.segment-card { padding: 0; overflow: hidden; }
+.segment-photo {
+  height: 7rem;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+.segment-photo-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  background: linear-gradient(to top, rgba(5,5,8,0.88) 0%, rgba(5,5,8,0.2) 70%, transparent 100%);
+}
+.segment-photo-overlay strong { display: block; font-size: 1rem; }
+.segment-flag { border-radius: 3px; flex-shrink: 0; }
+.segment-editable .segment-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.75rem 0;
+}
+.segment-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+  margin: 0.5rem 0.75rem 0.75rem;
+}
 .slot-grid { display: grid; gap: 0.5rem; }
 .slot-card { padding: 0.65rem 0.75rem; }
 .slot-card-head { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.35rem; }
@@ -672,33 +730,28 @@ html, body {
 .trip-country-rows { display: grid; gap: 0.45rem; }
 .trip-country-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.35rem;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
   align-items: center;
 }
-.trip-country-row .row-remove { grid-column: 2; justify-self: end; }
+.trip-country-row .row-remove { justify-self: end; min-height: 44px; }
 
 /* Segment editor */
 .segment-editable .segment-actions { margin-left: auto; display: flex; gap: 0.15rem; }
-.segment-edit-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.35rem;
-  margin-top: 0.5rem;
-}
 .segment-card-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 
 /* Day list */
 .day-list { display: grid; gap: 0.35rem; }
 .day-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.35rem;
-  flex-wrap: wrap;
+  align-items: center;
 }
-.day-row.active .day-chip { border-color: var(--accent); }
-.day-row-meta { font-size: 0.75rem; flex: 1; min-width: 4rem; }
+.day-row .day-chip { width: 100%; min-height: 44px; justify-content: center; }
+.day-row-meta { grid-column: 1 / -1; font-size: 0.75rem; padding-left: 0.15rem; }
 .day-row-actions { display: flex; gap: 0.1rem; }
+.day-row-actions .btn { min-width: 44px; min-height: 44px; }
 
 /* Day itinerary order */
 .planner-day-order .planner-item { align-items: center; }
@@ -716,23 +769,30 @@ html, body {
 
 .planner-footer {
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
-  justify-content: flex-end;
-  padding: 1rem 0 0.5rem;
+  padding: 0.75rem 0 0.5rem;
   margin-top: 0.5rem;
   border-top: 1px solid var(--border);
   position: sticky;
   bottom: 0;
-  background: linear-gradient(to top, var(--card) 80%, transparent);
+  background: linear-gradient(to top, var(--card) 85%, transparent);
 }
-.planner-footer .btn-primary { flex: 1; max-width: 12rem; }
+.planner-footer .btn { width: 100%; min-height: 48px; font-size: 1rem; }
+
+.modal-fields .field select,
+.modal-fields .field input { width: 100%; min-height: 44px; font-size: 16px; }
 
 .maps-url-add {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr;
   gap: 0.35rem;
   margin-top: 0.5rem;
 }
+.maps-url-add .btn { min-height: 44px; width: 100%; }
+
+.assist-key-form .pill-select,
+.assist-key-form input { min-height: 44px; font-size: 16px; width: 100%; }
 
 .assist-key-form {
   padding: 0.65rem 0.75rem;
@@ -904,6 +964,16 @@ html, body {
   .filter-row { grid-template-columns: 1fr; }
   .view-toggle .tab { font-size: 0.75rem; padding: 0.38rem 0.4rem; }
   .planner-grid { grid-template-columns: 1fr; }
+  .planner-dates { display: grid; grid-template-columns: 1fr; gap: 0.45rem; }
+  .planner-actions { flex-direction: column; padding: 0; }
+  .planner-actions .btn { width: 100%; min-height: 44px; }
+  .planner-item { flex-wrap: wrap; gap: 0.35rem; }
+  .planner-item-order .btn { min-width: 44px; min-height: 44px; }
+  .pick-place-btn { width: 100%; justify-content: flex-start; min-height: 44px; white-space: normal; }
+  .planner-pick-list { flex-direction: column; }
+  .planner-pick-list li { width: 100%; }
+  .segment-actions .btn { min-width: 44px; min-height: 44px; }
+  .day-row.active .day-chip { border-color: var(--accent); }
   .assist-head {
     flex-direction: column;
     align-items: stretch;
@@ -916,7 +986,8 @@ html, body {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.35rem;
   }
-  .assist-model { grid-column: 1 / -1; max-width: none; width: 100%; }
+  .assist-model { grid-column: 1 / -1; max-width: none; width: 100%; min-height: 44px; font-size: 16px; }
+  .assist-head-actions .btn-sm { min-height: 44px; font-size: 0.8rem; }
   .assist-sub { font-size: 0.7rem; }
   .assist-log { padding: 0.65rem 0.75rem; min-height: 100px; }
   .assist-bubble { max-width: 100%; font-size: 0.84rem; }
