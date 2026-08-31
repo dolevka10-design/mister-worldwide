@@ -48,6 +48,7 @@
           </div>
           <span class="user-chip muted" id="user-chip"></span>
           <div class="topbar-actions">
+            <button class="btn btn-ghost btn-sm" id="btn-import-maps" type="button">Import</button>
             <button class="btn btn-ghost btn-sm" id="btn-planner" type="button">Planner</button>
             <button class="btn btn-ghost btn-sm" id="btn-export-json" type="button">Export</button>
             <button class="btn btn-ghost btn-sm" id="btn-import" type="button">Import</button>
@@ -117,6 +118,7 @@
     </div>
 
     <aside id="planner-panel" class="planner-panel" hidden></aside>
+    <aside id="import-panel" class="import-panel" hidden></aside>
 
     <!-- AI Assistant -->
     <button type="button" class="assist-fab" id="assist-fab" aria-label="Open AI assistant">✦</button>
@@ -151,10 +153,12 @@
     <script src="js/store.js"></script>
     <script src="js/cloud.js"></script>
     <script src="js/import-maps.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/globe.gl@2.32.0/dist/globe.gl.min.js"></script>
     <script src="js/globe.js"></script>
     <script src="js/planner.js"></script>
+    <script src="js/import-panel.js"></script>
     <script src="js/app.js"></script>
     <script src="js/assistant.js"></script>
     <script>

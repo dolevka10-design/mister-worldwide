@@ -1,47 +1,56 @@
 # Mister Worldwide
 
-Interactive **3D travel globe** with Google Maps saved places, fine-grained categories, **Travel Planner** (multi-city / multi-country), and **Maps import**.
+Interactive **3D travel globe** with Google Maps saved places, fine-grained categories, **Travel Planner**, and **Google Takeout import**.
 
 **Live:** [Netlify](https://www.netlify.com/) — see [SETUP.md](SETUP.md)
 
 ## Features
 
-- **Mobile-first UI** — compact topbar, full-screen globe, bottom-sheet panels on phone
+- **Mobile-first UI** — compact topbar, full-screen globe, bottom-sheet panels
 - **3D globe** — flag pins, steady or auto-rotate
-- **Country strip** — touch scroll + arrows
-- **Fine-grained categories** — pizza, burgers, sushi, ramen, bagels, museums, landmarks, parks, etc.
-- **Place browser** — filter by city & category, sort, group by category/city/list
-- **Travel Planner** — multi-city & multi-country trips with date ranges per segment; day-by-day slots; local + AI suggestions
-- **Import Maps tab** — paste Google My Maps CSV; auto-creates countries, cities, categories
+- **Country strip** — touch scroll + arrows; all ~6,300 places assigned to countries
+- **Fine-grained categories** — pizza, burgers, sushi, ramen, bagels, museums, landmarks, etc.
+- **Place browser** — filter by city & category, sort, group views
+- **Travel Planner** — multi-city / multi-country trips, date ranges per segment, day itinerary, AI suggestions
+- **Import (standalone)** — Google Takeout ZIP or My Maps CSV paste; auto country, city, category
 - **AI assistant** — Gemini / Groq / OpenRouter with tool-calling
 - **Cloud sync** — Firestore per-user data + planner + assistant chat
 
-## Google Maps import
+## Import places
 
-In **Planner → Import Maps**, paste CSV:
+Tap **Import** in the top bar (not inside Planner):
 
+### Google Takeout ZIP
+1. Google Takeout → Saved → export as ZIP (CSV lists)
+2. Upload the ZIP in **Import → Takeout ZIP**
+3. Places are matched by Google URL, geocoded when needed, assigned to countries & categories
+
+### My Maps CSV paste
 ```text
 Name,Description,Latitude,Longitude,Url
 Joe's Pizza,"Rome | Italy | https://...",41.89,12.49,https://...
 ```
 
-Or ask the AI: *"Import this CSV into my globe: Name,Description,..."*
+Rebuild seed from Takeout locally:
+```bash
+node scripts/import-takeout.js path/to/takeout.zip
+```
 
 ## Travel Planner
 
-1. **Planner** → create trip with start/end dates
-2. **+ City** to add segments (country, city, date range)
-3. Each day uses places from that segment's city
-4. **Quick suggest** (zero tokens) or **AI suggest** per day
-5. **+ Trip** on any place in a country page
+1. **Planner** → create trip with dates
+2. Add **city/country segments** with date ranges
+3. Use **day chips** to switch days; suggestions follow each segment's city
+4. **+ Trip** on any place in a country page
 
 ## Data
 
 ```bash
 node scripts/build-data.js path/to/by-country-mymaps
+node scripts/import-takeout.js path/to/takeout.zip
 ```
 
-~6,287 places / 37 countries in `data/places.json`. Categories refined at runtime via `js/categorize.js`.
+~6,323 places / 40 countries in `data/places.json`. Categories refined at runtime via `js/categorize.js`.
 
 ## Quick start
 

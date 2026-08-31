@@ -40,13 +40,21 @@ Keys sync via Firestore `assistantChats/{uid}`.
 
 Travel planner trips sync in `worldData/{uid}.planner` alongside places and countries.
 
-### Import Google Maps CSV
+### Import Google Maps / Takeout
 
-1. Open **Planner → Import Maps**
-2. Paste exported CSV (`Name,Description,Latitude,Longitude,Url`)
-3. Description should be `City | Country | URL` — new countries are created automatically
+**In the app:** tap **Import** in the top bar (standalone panel, not in Planner).
 
-Or use the AI assistant: `import_google_maps_csv` tool with pasted `csv_text`.
+1. **Takeout ZIP** — upload `takeout-*.zip` (Saved places CSV lists)
+2. **Paste CSV** — My Maps format with lat/lng
+
+**CLI merge into seed:**
+```bash
+node scripts/import-takeout.js path/to/takeout.zip
+```
+
+Takeout CSV format (Hebrew headers): `כותרת,הערה,כתובת אתר` — title, note, Google Maps URL. Country/city inferred from list filename and geocoding.
+
+Or use the AI assistant: `import_google_maps_csv` tool.
 
 ## 5. Mobile
 

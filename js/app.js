@@ -533,6 +533,7 @@ window.WorldApp = (() => {
     });
 
     WorldPlanner?.init?.();
+    WorldImportPanel?.init?.();
   }
 
   return {
