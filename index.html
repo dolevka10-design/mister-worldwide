@@ -57,7 +57,12 @@
           <h2 class="sidebar-title">Countries</h2>
           <div id="country-list" class="country-list"></div>
         </aside>
-        <div id="globe" class="globe-canvas" aria-label="3D world globe"></div>
+        <div class="globe-wrap">
+          <div class="globe-toolbar">
+            <button type="button" class="btn btn-sm btn-ghost globe-rotate-btn" id="btn-globe-rotate" aria-pressed="false">Steady</button>
+          </div>
+          <div id="globe" class="globe-canvas" aria-label="3D world globe"></div>
+        </div>
       </main>
 
       <aside id="country-panel" class="country-panel">

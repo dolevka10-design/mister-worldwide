@@ -121,9 +121,10 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
   padding: 1rem;
   overflow: auto;
   background: var(--bg-elevated);
+  min-height: 0;
 }
 .sidebar-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 0.75rem; }
-.country-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.country-list { display: flex; flex-direction: column; gap: 0.35rem; min-height: 0; }
 .country-chip {
   display: flex;
   align-items: center;
@@ -141,19 +142,57 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
 .country-chip:hover, .country-chip.active { border-color: var(--border); background: var(--card); }
 .country-chip small { margin-left: auto; color: var(--muted); }
 
+.globe-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  min-height: 50dvh;
+  align-self: stretch;
+}
 .globe-canvas {
   position: relative;
   width: 100%;
+  height: 100%;
   min-height: 420px;
   min-height: 50dvh;
-  height: 100%;
-  align-self: stretch;
   background: radial-gradient(circle at 50% 40%, #101018 0%, #050508 70%);
+  touch-action: none;
+  overflow: hidden;
+}
+.globe-toolbar {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 12;
+  display: flex;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+.globe-rotate-btn {
+  pointer-events: auto;
+  backdrop-filter: blur(8px);
+  background: rgba(5, 5, 8, 0.72) !important;
+  border-color: var(--border) !important;
+}
+.globe-rotate-btn[aria-pressed="true"] {
+  border-color: var(--accent) !important;
+  color: var(--accent);
 }
 .globe-canvas canvas {
   display: block;
   width: 100% !important;
   height: 100% !important;
+}
+/* CSS2D overlay wrapper — let pins receive taps; canvas still draggable */
+.globe-canvas.globe-ready .scene-container > div {
+  pointer-events: none;
+}
+.globe-canvas.globe-ready .globe-flag-pin {
+  pointer-events: auto;
+  touch-action: manipulation;
+  position: relative;
+  z-index: 8;
 }
 
 .globe-flag-pin {
@@ -162,6 +201,12 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
   align-items: center;
   gap: 0.15rem;
   cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0.35rem;
+  margin: 0;
+  font: inherit;
+  color: inherit;
   transform: translate(-50%, -100%);
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
   transition: transform 0.15s ease;
@@ -355,21 +400,28 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--te
 .toast-error { border-color: var(--danger); color: #ffb4bc; }
 
 @media (max-width: 900px) {
-  .globe-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(50dvh, 1fr); }
+  .globe-layout { grid-template-columns: 1fr; grid-template-rows: minmax(200px, 34dvh) minmax(50dvh, 1fr); }
   .sidebar {
     border-right: none;
     border-bottom: 1px solid var(--border);
-    max-height: 140px;
+    max-height: none;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
   .country-list {
-    flex-direction: row;
+    flex: 1;
+    flex-direction: column;
     flex-wrap: nowrap;
-    overflow-x: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: none;
     padding-bottom: 0.25rem;
+    -webkit-overflow-scrolling: touch;
   }
-  .country-chip { width: auto; flex-shrink: 0; }
+  .country-chip { width: 100%; flex-shrink: 0; }
   .country-panel { width: 100%; }
-  .globe-canvas { min-height: 50dvh; }
+  .globe-wrap, .globe-canvas { min-height: 50dvh; }
 }
 
 @media (max-width: 520px) {

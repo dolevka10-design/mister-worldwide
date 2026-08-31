@@ -70,14 +70,65 @@ window.WorldStore = (() => {
     const c = state.countries.find((x) => x.id === countryId);
     if (!c) return;
     c.placeCount = pts.length;
-    if (pts.length) {
-      c.lat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
-      c.lng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+  }
+
+  function countriesForUi(state) {
+    if (!state?.places?.length) {
+      return (state?.countries || []).filter((c) => (c.placeCount || 0) > 0);
     }
+
+    const counts = new Map();
+    for (const p of state.places) {
+      counts.set(p.countryId, (counts.get(p.countryId) || 0) + 1);
+    }
+
+    const byId = new Map((state.countries || []).map((c) => [c.id, { ...c }]));
+    for (const sc of seed?.countries || []) {
+      if (!byId.has(sc.id)) byId.set(sc.id, { ...sc });
+    }
+
+    const out = [];
+    for (const [countryId, placeCount] of counts) {
+      if (!placeCount) continue;
+      const base = byId.get(countryId);
+      out.push({
+        ...(base || {
+          id: countryId,
+          name: countryId.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()),
+          iso: countryId.slice(0, 2),
+        }),
+        placeCount,
+      });
+    }
+
+    return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   function reconcileState(state) {
-    if (!state?.countries?.length) return state;
+    if (!state?.places) return state;
+    const byId = new Map((state.countries || []).map((c) => [c.id, { ...c }]));
+
+    for (const sc of seed?.countries || []) {
+      if (!byId.has(sc.id)) byId.set(sc.id, { ...sc });
+    }
+
+    for (const p of state.places) {
+      if (byId.has(p.countryId)) continue;
+      const seedC = seed?.countries?.find((c) => c.id === p.countryId);
+      byId.set(
+        p.countryId,
+        seedC || {
+          id: p.countryId,
+          name: p.countryId.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()),
+          iso: p.countryId.slice(0, 2),
+          placeCount: 0,
+          lat: p.lat,
+          lng: p.lng,
+        }
+      );
+    }
+
+    state.countries = [...byId.values()];
     for (const c of state.countries) recalcCountry(state, c.id);
     return state;
   }
@@ -187,7 +238,7 @@ window.WorldStore = (() => {
 
   return {
     loadSeed, loadState, saveState, defaultState, setUserEmail, uid,
-    nextPlaceId, recalcCountry, reconcileState, placesByCountry, groupByCity, groupByCategory,
+    nextPlaceId, recalcCountry, reconcileState, countriesForUi, placesByCountry, groupByCity, groupByCategory,
     exportCountryCsv, importCsvPlaces,
   };
 })();

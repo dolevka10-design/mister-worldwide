@@ -31,7 +31,7 @@ window.WorldApp = (() => {
         updatedAt: state.updatedAt,
       });
     }
-    WorldGlobe.updatePins(state.countries);
+    WorldGlobe.updatePins(countriesForUi(state));
     renderCountryPanel();
     renderStats();
   }
@@ -53,24 +53,28 @@ window.WorldApp = (() => {
     renderCountryList();
     if (selectedCountry) renderCountryPanel();
     if (WorldGlobe.isReady?.()) {
-      WorldGlobe.updatePins(state.countries);
+      WorldGlobe.updatePins(countriesForUi(state));
     } else if (!$("app-root")?.classList.contains("hidden")) {
       ensureGlobe();
     }
   }
 
+  function countriesForUi(state) {
+    return WorldStore.countriesForUi(state);
+  }
+
   function renderStats() {
     const total = state.places.length;
-    const countries = state.countries.filter((c) => c.placeCount > 0).length;
+    const list = countriesForUi(state);
     $("stat-places").textContent = total.toLocaleString();
-    $("stat-countries").textContent = countries;
+    $("stat-countries").textContent = list.length;
   }
 
   function renderCountryList() {
     const el = $("country-list");
     if (!el) return;
-    el.innerHTML = state.countries
-      .filter((c) => c.placeCount > 0)
+    const list = countriesForUi(state);
+    el.innerHTML = list
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(
         (c) => `
@@ -255,9 +259,22 @@ window.WorldApp = (() => {
 
   function mergeCloudState(local, remote) {
     if (!remote) return WorldStore.reconcileState(local);
-    const next = { ...local, ...remote };
+
+    const countries = new Map((local?.countries || []).map((c) => [c.id, { ...c }]));
+    for (const c of remote?.countries || []) {
+      const prev = countries.get(c.id);
+      countries.set(c.id, prev ? { ...prev, ...c } : { ...c });
+    }
+
+    const next = {
+      ...local,
+      ...remote,
+      countries: [...countries.values()],
+    };
+
     if (!remote.places?.length && local?.places?.length) next.places = local.places;
     if (!remote.countries?.length && local?.countries?.length) next.countries = local.countries;
+
     return WorldStore.reconcileState(next);
   }
 
@@ -287,13 +304,13 @@ window.WorldApp = (() => {
 
       if (!ready || !WorldGlobe.isReady?.()) {
         await WorldGlobe.init(el, {
-          countries: state?.countries || [],
+          countries: countriesForUi(state),
           onCountryClick: selectCountry,
         });
         ready = true;
       } else {
         WorldGlobe.resize();
-        WorldGlobe.updatePins(state?.countries || []);
+        WorldGlobe.updatePins(countriesForUi(state));
       }
     } catch (e) {
       console.error("Globe init failed", e);
