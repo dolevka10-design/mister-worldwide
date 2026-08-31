@@ -46,6 +46,9 @@ Travel planner trips sync in real time via Firestore `worldData/{uid}.planner` a
 
 1. **Takeout ZIP** — upload `takeout-*.zip` (Saved places CSV lists)
 2. **Paste CSV** — My Maps format with lat/lng
+3. **Maps URL** — one URL per line, or `Place name | City | Country | URL` when a short link has no coordinates
+
+**Planner itinerary import:** open **Planner** → **Import Excel/PDF**. Accepts `.xlsx`, `.xls`, `.csv`, and `.pdf` with columns Date, Day, Location, Time/Order, Place/Activity, Notes, Category, Google Maps Link. New places from the file are added to the country/city bank.
 
 **CLI merge into seed:**
 ```bash
@@ -54,11 +57,11 @@ node scripts/import-takeout.js path/to/takeout.zip
 
 Takeout CSV format (Hebrew headers): `כותרת,הערה,כתובת אתר` — title, note, Google Maps URL. Country/city inferred from list filename and geocoding.
 
-Or use the AI assistant: `import_google_maps_csv` tool.
+Or use the AI assistant: `import_google_maps_csv` / `import_maps_urls` tools.
 
 ## 5. Mobile
 
-The app is a responsive PWA-ready SPA. Add to home screen on iOS/Android after deploy.
+The app is a responsive SPA sized for iOS Safari (viewport-fit, 44px+ targets, dark `input[type=date]`, full-width planner and assistant sheets). Add to home screen after deploy.
 No native build required.
 
 ## 6. Troubleshooting
@@ -66,3 +69,5 @@ No native build required.
 - **Empty country bar / 0 stats on load** — hard refresh; ensure you are on the latest deploy.
 - **Globe blank** — check browser console; ensure `globe.gl` CDN is reachable.
 - **Planner AI** — requires a Groq/OpenRouter key in the assistant; use **Quick suggest** for zero-token local picks.
+- **Maps URL “quota” / not found** — paste `Name | City | Country | URL`, or a full `maps.google.com` link with `@lat,lng`. Country-page Add URL still saves the place on that country if the short link cannot be expanded.
+- **Trip chip does nothing** — hard refresh after deploy; trips are tappable chips on the planner home list and open the itinerary on the same page.

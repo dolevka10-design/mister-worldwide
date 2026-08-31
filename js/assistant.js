@@ -857,6 +857,7 @@
       toggleKeyForm(false);
     }
     fab?.classList.toggle("open", shouldOpen);
+    try { localStorage.setItem("mister-worldwide-assist-open", shouldOpen ? "1" : "0"); } catch { /* */ }
     if (shouldOpen) $("assist-input")?.focus();
   }
 
@@ -867,8 +868,9 @@
       "You are the Mister Worldwide AI travel assistant.",
       `You are helping ${name} (${who}), an allowlisted user.`,
       "Data is PRIVATE to this signed-in user. You manage countries, Google Maps saved places on a 3D globe, and Travel Planner trips.",
-      "Planner slots: breakfast, brunch, lunch, afternoon, dinner, drinks, dessert, show, activity, hotel, transport.",
-      "Use planner_create_trip, planner_add_segment, planner_suggest_day (prefer use_ai:false), planner_add_to_day, get_planner_snapshot, import_google_maps_csv, import_maps_urls.",
+      "Planner itinerary columns: Date, Day, Location, Time/Order, Place/Activity, Notes, Category, Google Maps link.",
+      "Trips are one scrollable document grouped by location then day. Use planner_create_trip, planner_add_segment, planner_add_to_day, get_planner_snapshot, import_maps_urls.",
+      "When adding places from Maps URLs, include name | city | country if the short link has no coordinates.",
       "Categories include: pizza, burger, sushi, ramen, bagel, museum, landmark, park, and more.",
       "Places are grouped by country and city. CSV format: Name,Description,Latitude,Longitude,Url.",
       "ALWAYS use tools to read or change data — never invent places or countries.",
@@ -2394,6 +2396,9 @@
     });
 
     refreshModelSelect();
+    try {
+      if (localStorage.getItem("mister-worldwide-assist-open") === "1") openPanel(true);
+    } catch { /* */ }
   }
 
   window.WorldAssistant = {

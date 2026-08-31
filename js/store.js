@@ -178,42 +178,35 @@ window.WorldStore = (() => {
     return Number.isFinite(ms) ? ms : 0;
   }
 
+  function tripStamp(trip) {
+    return Date.parse(trip?.updatedAt || trip?.createdAt || "") || 0;
+  }
+
   function mergePlanner(local, remote) {
-    const l = local?.trips?.length ? local : emptyPlanner();
-    const r = remote?.trips?.length ? remote : emptyPlanner();
-    const lMs = plannerTimestamp(l, null);
-    const rMs = plannerTimestamp(r, null);
-
-    if (!l.trips?.length && r.trips?.length) {
-      return { ...r, trips: [...r.trips], activeTripId: r.activeTripId || r.trips[0]?.id || null };
-    }
-    if (l.trips?.length && !r.trips?.length) {
-      return { ...l, trips: [...l.trips], activeTripId: l.activeTripId || l.trips[0]?.id || null };
-    }
-    if (!l.trips?.length && !r.trips?.length) return emptyPlanner();
-
-    if (rMs > lMs) {
-      return { ...r, trips: [...r.trips], activeTripId: r.activeTripId || l.activeTripId || r.trips[0]?.id || null };
-    }
-    if (lMs > rMs) {
-      return { ...l, trips: [...l.trips], activeTripId: l.activeTripId || r.activeTripId || l.trips[0]?.id || null };
-    }
+    const l = local || emptyPlanner();
+    const r = remote || emptyPlanner();
+    const lTrips = Array.isArray(l.trips) ? l.trips : [];
+    const rTrips = Array.isArray(r.trips) ? r.trips : [];
+    if (!lTrips.length && !rTrips.length) return emptyPlanner();
 
     const byId = new Map();
-    for (const trip of l.trips) byId.set(trip.id, { ...trip });
-    for (const trip of r.trips) {
+    for (const trip of rTrips) if (trip?.id) byId.set(trip.id, { ...trip });
+    for (const trip of lTrips) {
+      if (!trip?.id) continue;
       const prev = byId.get(trip.id);
-      byId.set(trip.id, prev ? { ...prev, ...trip } : { ...trip });
+      if (!prev) {
+        byId.set(trip.id, { ...trip });
+        continue;
+      }
+      byId.set(trip.id, tripStamp(trip) >= tripStamp(prev) ? { ...prev, ...trip } : { ...trip, ...prev });
     }
-    const trips = [...byId.values()].sort((a, b) => {
-      const ad = Date.parse(a.createdAt || a.startDate || "") || 0;
-      const bd = Date.parse(b.createdAt || b.startDate || "") || 0;
-      return bd - ad;
-    });
+    const trips = [...byId.values()].sort((a, b) => tripStamp(b) - tripStamp(a) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    const lMs = plannerTimestamp(l, null);
+    const rMs = plannerTimestamp(r, null);
     const updatedAt = new Date(Math.max(lMs, rMs, Date.now())).toISOString();
     return {
       trips,
-      activeTripId: r.activeTripId || l.activeTripId || trips[0]?.id || null,
+      activeTripId: (lMs >= rMs ? l.activeTripId : r.activeTripId) || l.activeTripId || r.activeTripId || trips[0]?.id || null,
       updatedAt,
     };
   }

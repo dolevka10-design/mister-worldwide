@@ -37,7 +37,7 @@ window.WorldApp = (() => {
 
   function persistPlanner({ flush, skipPlannerRender } = {}) {
     persist({ touchPlanner: true });
-    if (!skipPlannerRender) WorldPlanner?.render?.(state);
+    if (!skipPlannerRender && WorldPlanner?.isOpen?.()) WorldPlanner?.render?.(state);
     if (flush && user?.uid && WorldCloud.configured) {
       WorldCloud.flushSave(user.uid, WorldStore.packCloudPayload(state));
     }
@@ -64,7 +64,7 @@ window.WorldApp = (() => {
     } else if (!$("app-root")?.classList.contains("hidden")) {
       ensureGlobe();
     }
-    WorldPlanner?.render?.(state);
+    if (WorldPlanner?.isOpen?.()) WorldPlanner.render(state);
   }
 
   function countriesForUi(state) {
@@ -317,6 +317,7 @@ window.WorldApp = (() => {
         const r = await WorldMapsImport.importMapsUrls(state, url, {
           countryId: selectedCountry,
           countryName: country?.name,
+          city: filterCity || "",
         });
         persist();
         $("maps-url-input").value = "";

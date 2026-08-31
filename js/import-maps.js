@@ -251,9 +251,27 @@ window.WorldMapsImport = (() => {
     return { added, skipped, newCountries: [...newCountries], pending, byUrl: urlIndex, existingKeys: keys };
   }
 
+  async function geocodePhoton(q) {
+    try {
+      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const f = data?.features?.[0];
+      if (!f?.geometry?.coordinates) return null;
+      const [lng, lat] = f.geometry.coordinates;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      const p = f.properties || {};
+      return { lat, lng, city: p.city || p.name || "", country: p.country || "" };
+    } catch {
+      return null;
+    }
+  }
+
   async function geocodePlace(name, city, country) {
     const q = [name, city, country].filter(Boolean).join(", ");
     if (!q) return null;
+    const photon = await geocodePhoton(q);
+    if (photon) return photon;
     try {
       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, {
         headers: { Accept: "application/json", "User-Agent": "MisterWorldwide/1.0" },
@@ -272,6 +290,14 @@ window.WorldMapsImport = (() => {
     }
   }
 
+  function countryCentroid(state, countryName, countryId) {
+    const c = (state.countries || []).find((x) =>
+      x.id === countryId || (countryName && x.name.toLowerCase() === String(countryName).toLowerCase())
+    );
+    if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) return { lat: c.lat, lng: c.lng, approx: true };
+    return null;
+  }
+
   async function resolvePending(state, pending, onProgress) {
     const added = [];
     let quotaHit = false;
@@ -283,11 +309,12 @@ window.WorldMapsImport = (() => {
         coords = await geocodePlace(p.name, p.city, p.countryName);
       } catch (e) {
         if (e.code === "GEOCODE_QUOTA") {
+          coords = countryCentroid(state, p.countryName);
           quotaHit = true;
-          break;
         }
       }
-      await new Promise((r) => setTimeout(r, 1100));
+      if (!coords) coords = countryCentroid(state, p.countryName);
+      await new Promise((r) => setTimeout(r, 400));
       if (!coords) continue;
       const byUrl = buildUrlIndex(state);
       const existingKeys = new Set((state.places || []).map((x) => `${norm(x.name)}|${x.lat?.toFixed(4)}|${x.lng?.toFixed(4)}`));
@@ -306,7 +333,7 @@ window.WorldMapsImport = (() => {
       if (r.status === "added") added.push(r.place);
     }
     if (quotaHit && !added.length) {
-      throw new Error("Geocoding limit reached. Open the link in Google Maps, copy a full maps.google.com URL with coordinates, or try again later.");
+      throw new Error("Could not pin exact coordinates (quota). Add Name | City | Country with the URL, or paste a full maps.google.com link with @lat,lng.");
     }
     WorldStore.recategorizePlaces(state);
     return added;
@@ -512,7 +539,6 @@ window.WorldMapsImport = (() => {
             if (!finalCity) finalCity = rev.city;
             if (!finalCountry) finalCountry = rev.country;
           }
-          await new Promise((r) => setTimeout(r, 1100));
         }
         const r = addPlace(state, {
           name,
@@ -528,7 +554,24 @@ window.WorldMapsImport = (() => {
         if (r.status === "added") added.push(r.place);
         else if (r.status === "skipped") skipped.push(name);
       } else {
-        pending.push({ name, url: url || "", countryName: placeCountry, city: placeCity, desc: "" });
+        const fallback = countryCentroid(state, placeCountry, countryId);
+        if (fallback) {
+          const r = addPlace(state, {
+            name,
+            desc: `${placeCity || ""} | ${placeCountry || ""} | ${url || ""}`,
+            lat: fallback.lat,
+            lng: fallback.lng,
+            url: url || "",
+            countryName: placeCountry,
+            city: placeCity || country?.name || "",
+            byUrl,
+            existingKeys,
+          });
+          if (r.status === "added") added.push(r.place);
+          else if (r.status === "skipped") skipped.push(name);
+        } else {
+          pending.push({ name, url: url || "", countryName: placeCountry, city: placeCity, desc: "" });
+        }
       }
     }
 

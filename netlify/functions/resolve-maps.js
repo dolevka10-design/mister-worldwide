@@ -98,6 +98,27 @@ async function reverseGeocode(lat, lng) {
   }
 }
 
+async function geocodeQuery(q) {
+  if (!q) return null;
+  try {
+    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const f = data?.features?.[0];
+    if (!f?.geometry?.coordinates) return null;
+    const [lng, lat] = f.geometry.coordinates;
+    const p = f.properties || {};
+    return {
+      lat,
+      lng,
+      city: p.city || "",
+      country: p.country || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: cors, body: "" };
@@ -131,7 +152,9 @@ exports.handler = async (event) => {
     });
     const finalUrl = res.url || url;
     const html = await res.text();
-    const coords =
+    let city = null;
+    let country = null;
+    let coords =
       parseCoordsFromString(finalUrl) ||
       parseCoordsFromString(html.slice(0, 1200000)) ||
       parseCoordsFromAppInit(html);
@@ -141,12 +164,19 @@ exports.handler = async (event) => {
       parseNameFromHtml(html) ||
       null;
 
-    let city = null;
-    let country = null;
-    if (coords) {
+    if (!coords && name) {
+      const geo = await geocodeQuery(name);
+      if (geo) {
+        coords = { lat: geo.lat, lng: geo.lng };
+        city = geo.city || null;
+        country = geo.country || null;
+      }
+    }
+
+    if (coords && (!city || !country)) {
       const rev = await reverseGeocode(coords.lat, coords.lng);
-      city = rev.city || null;
-      country = rev.country || null;
+      city = city || rev.city || null;
+      country = country || rev.country || null;
     }
 
     return {

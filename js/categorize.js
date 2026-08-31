@@ -43,8 +43,9 @@ window.PlaceCategorize = (() => {
     { cat: "zoo", re: /\b(zoo|aquarium|safari|wildlife)\b/i },
     { cat: "stadium", re: /\b(stadium|arena|sports|football|soccer|baseball)\b/i },
     { cat: "show", re: /\b(theater|theatre|concert|opera|show|performance|cabaret|musical)\b/i },
-    { cat: "hotel", re: /\b(hotel|hostel|resort|inn|ryokan|lodging)\b/i },
-    { cat: "transport", re: /\b(station|airport|terminal|metro|subway|train|bus stop|ferry)\b/i },
+    { cat: "hotel", re: /\b(hotel|hostel|resort|inn|ryokan|lodging|accommodation|check-in|check in|check-out|check out)\b/i },
+    { cat: "transport", re: /\b(station|airport|terminal|metro|subway|train|bus stop|ferry|flight|airtrain|lirr|q70|transportation)\b/i },
+    { cat: "guide", re: /\b(guide|info|how to get|getting to)\b/i },
   ];
 
   const LABELS = {
@@ -60,7 +61,24 @@ window.PlaceCategorize = (() => {
     dessert: "Desserts & Sweets", bar: "Bars", nightlife: "Nightlife & Clubs", brewery: "Breweries & Wineries",
     shopping: "Shopping", temple: "Temples & Churches", landmark: "Landmarks", viewpoint: "Viewpoints",
     zoo: "Zoos & Aquariums", stadium: "Stadiums & Sports", show: "Shows & Entertainment",
-    hotel: "Hotels & Lodging", transport: "Transport",
+    hotel: "Hotels & Lodging", transport: "Transport", guide: "Guide / Info",
+  };
+
+  const PLANNER_LABELS = {
+    "food & dining": "restaurant",
+    "food and dining": "restaurant",
+    "sightseeing / attraction": "landmark",
+    "sightseeing": "landmark",
+    "attraction": "landmark",
+    "coffee & snacks": "cafe",
+    "coffee and snacks": "cafe",
+    "accommodation": "hotel",
+    "nightlife / drinks": "bar",
+    "nightlife": "nightlife",
+    "transportation / flight": "transport",
+    "transportation": "transport",
+    "guide / info": "guide",
+    "shopping": "shopping",
   };
 
   const EAT_CATS = new Set([
@@ -70,7 +88,35 @@ window.PlaceCategorize = (() => {
     "seafood", "steakhouse", "restaurant", "street_food", "market", "bakery", "cafe", "dessert",
   ]);
 
+  function fromPlannerLabel(label) {
+    const n = String(label || "").trim().toLowerCase();
+    if (PLANNER_LABELS[n]) return PLANNER_LABELS[n];
+    if (LABELS[n]) return n;
+    return categorize(label, label);
+  }
+
+  function plannerLabel(cat) {
+    const reverse = {
+      restaurant: "Food & Dining",
+      landmark: "Sightseeing / Attraction",
+      cafe: "Coffee & Snacks",
+      bakery: "Coffee & Snacks",
+      hotel: "Accommodation",
+      bar: "Nightlife / Drinks",
+      nightlife: "Nightlife / Drinks",
+      cocktail_bar: "Nightlife / Drinks",
+      wine_bar: "Nightlife / Drinks",
+      transport: "Transportation",
+      guide: "Guide / Info",
+      shopping: "Shopping",
+    };
+    return reverse[cat] || label(cat);
+  }
+
   function categorize(name, desc) {
+    const fromLabel = PLANNER_LABELS[String(desc || "").trim().toLowerCase()]
+      || PLANNER_LABELS[String(name || "").trim().toLowerCase()];
+    if (fromLabel) return fromLabel;
     const text = `${name || ""} ${desc || ""}`;
     for (const { cat, re } of RULES) if (re.test(text)) return cat;
     return "place";
@@ -96,11 +142,11 @@ window.PlaceCategorize = (() => {
     if (cat === "dessert") return "dessert";
     if (cat === "show") return "show";
     if (cat === "hotel") return "hotel";
-    if (cat === "transport") return "transport";
+    if (cat === "transport" || cat === "guide") return "transport";
     if (["museum", "landmark", "monument", "viewpoint", "temple"].includes(cat)) return "activity";
     if (["park", "beach", "amusement", "zoo"].includes(cat)) return "afternoon";
     return "activity";
   }
 
-  return { categorize, label, LABELS, parseCity, allLabels: () => ({ ...LABELS }), isEatCategory, defaultSlot, RULES };
+  return { categorize, label, LABELS, parseCity, allLabels: () => ({ ...LABELS }), isEatCategory, defaultSlot, RULES, fromPlannerLabel, plannerLabel };
 })();

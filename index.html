@@ -130,7 +130,7 @@
       <header class="assist-head">
         <div>
           <strong>Travel AI</strong>
-          <p class="muted assist-sub" id="assist-sub">Add · remove · revise countries &amp; places</p>
+          <p class="muted assist-sub" id="assist-sub">Persistent chat · places · trips · itineraries</p>
         </div>
         <div class="assist-head-actions">
           <button type="button" class="btn btn-ghost btn-sm" id="assist-undo">Undo</button>
@@ -192,8 +192,14 @@
     <script src="js/cloud.js"></script>
     <script src="js/import-maps.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+      if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    </script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/globe.gl@2.32.0/dist/globe.gl.min.js"></script>
+    <script src="js/import-planner.js"></script>
     <script src="js/globe.js"></script>
     <script src="js/planner.js"></script>
     <script src="js/import-panel.js"></script>
