@@ -267,6 +267,60 @@
       description: "Undo the last assistant mutation to travel data.",
       parameters: { type: "OBJECT", properties: {} },
     },
+    {
+      name: "get_planner_snapshot",
+      description: "Get active travel planner trips, days, and suggestions (compact).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          trip_id: { type: "STRING", description: "Optional trip id; defaults to active trip" },
+        },
+      },
+    },
+    {
+      name: "planner_create_trip",
+      description: "Create a travel planner trip for a country and city.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          country: { type: "STRING" },
+          city: { type: "STRING" },
+          name: { type: "STRING" },
+          days: { type: "INTEGER", description: "Number of days (default 3)" },
+        },
+        required: ["country", "city"],
+      },
+    },
+    {
+      name: "planner_add_to_day",
+      description: "Add a saved place to a planner day slot (breakfast, lunch, dinner, drinks, activity, hotel, etc.).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          place_id: { type: "STRING" },
+          day: { type: "INTEGER" },
+          slot: { type: "STRING", description: "breakfast, lunch, dinner, drinks, dessert, show, activity, afternoon, hotel, transport" },
+          note: { type: "STRING", description: "e.g. breakfast, drinks, show" },
+          trip_id: { type: "STRING" },
+        },
+        required: ["place_id", "day", "slot"],
+      },
+    },
+    {
+      name: "planner_suggest_day",
+      description: "Suggest places for one planner day using local heuristics (low token). Optional AI if key set.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          day: { type: "INTEGER" },
+          trip_id: { type: "STRING" },
+          use_ai: { type: "BOOLEAN", description: "Use compact AI call (default false)" },
+          hour: { type: "INTEGER" },
+          weather: { type: "STRING" },
+        },
+        required: ["day"],
+      },
+    },
   ];
 
   function $(id) {
@@ -694,8 +748,10 @@
     return [
       "You are the Mister Worldwide AI travel assistant.",
       `You are helping ${name} (${who}), an allowlisted user.`,
-      "Data is PRIVATE to this signed-in user. You manage countries and Google Maps saved places on a 3D globe.",
-      "Categories include: museum, skyscraper, amusement, park, beach, restaurant, street_food, cafe, bar, shopping, temple, landmark, zoo, stadium, hotel, transport, place.",
+      "Data is PRIVATE to this signed-in user. You manage countries, Google Maps saved places on a 3D globe, and Travel Planner trips.",
+      "Planner slots: breakfast, brunch, lunch, afternoon, dinner, drinks, dessert, show, activity, hotel, transport.",
+      "Use planner_create_trip, planner_suggest_day (prefer use_ai:false for low tokens), planner_add_to_day, get_planner_snapshot.",
+      "Categories include: bagel, asian_restaurant, italian_restaurant, museum, landmark, park, beach, restaurant, street_food, cafe, bar, hotel, show, transport, and more.",
       "Places are grouped by country and city. CSV format: Name,Description,Latitude,Longitude,Url.",
       "ALWAYS use tools to read or change data — never invent places or countries.",
       "If ambiguous, ask a short clarifying question BEFORE mutating.",
@@ -727,9 +783,9 @@
     };
   }
 
-  function runTool(name, args) {
+  async function runTool(name, args) {
     const api = window.WorldApp;
-    if (!api?.ready?.()) return { ok: false, error: "App not ready — user must sign in." };
+    if (!api?.getState?.()) return { ok: false, error: "App not ready." };
     args = args || {};
 
     if (name === "get_world_snapshot") {
@@ -912,6 +968,84 @@
       const last = undoStack.pop();
       persistRefresh(clone(last.state));
       return { ok: true, reverted: last.label };
+    }
+
+    if (name === "get_planner_snapshot") {
+      const state = api.getState();
+      WorldPlanner.ensurePlanner(state);
+      const trip = args.trip_id
+        ? state.planner.trips.find((t) => t.id === args.trip_id)
+        : WorldPlanner.getActiveTrip(state);
+      if (!trip) {
+        return {
+          ok: true,
+          trips: (state.planner.trips || []).map((t) => ({
+            id: t.id, name: t.name, city: t.city, countryId: t.countryId, dayCount: t.dayCount,
+          })),
+        };
+      }
+      return {
+        ok: true,
+        trip: {
+          id: trip.id, name: trip.name, city: trip.city, countryId: trip.countryId, dayCount: trip.dayCount,
+          days: (trip.days || []).map((d) => ({
+            day: d.day,
+            slots: Object.fromEntries(
+              Object.entries(d.slots || {}).map(([k, v]) => [k, (v || []).map((e) => ({ name: e.name, note: e.note }))])
+            ),
+          })),
+          suggestions: (trip.suggestions || []).slice(0, 12).map((s) => ({ name: s.name, slot: s.slot, reason: s.reason })),
+        },
+      };
+    }
+
+    if (name === "planner_create_trip") {
+      const state = api.getState();
+      const countryId = resolveCountryId(args.country, state);
+      if (!countryId) return { ok: false, error: "Country not found" };
+      snapshot(`Create trip ${args.city}`);
+      const trip = WorldPlanner.createTrip(state, {
+        countryId,
+        city: args.city || "Other",
+        name: args.name,
+        dayCount: Number(args.days) || 3,
+      });
+      persistRefresh(state);
+      return { ok: true, trip: { id: trip.id, name: trip.name, city: trip.city, dayCount: trip.dayCount } };
+    }
+
+    if (name === "planner_add_to_day") {
+      const state = api.getState();
+      const place = (state.places || []).find((p) => p.id === args.place_id);
+      if (!place) return { ok: false, error: "Place not found" };
+      const trip = args.trip_id
+        ? WorldPlanner.ensurePlanner(state).trips.find((t) => t.id === args.trip_id)
+        : WorldPlanner.getActiveTrip(state);
+      if (!trip) return { ok: false, error: "No active trip — create one first" };
+      snapshot(`Add ${place.name} to day ${args.day}`);
+      WorldPlanner.addPlace(state, trip.id, Number(args.day) || 1, args.slot, place, args.note || "");
+      persistRefresh(state);
+      return { ok: true, added: place.name, day: args.day, slot: args.slot };
+    }
+
+    if (name === "planner_suggest_day") {
+      const state = api.getState();
+      const trip = args.trip_id
+        ? WorldPlanner.ensurePlanner(state).trips.find((t) => t.id === args.trip_id)
+        : WorldPlanner.getActiveTrip(state);
+      if (!trip) return { ok: false, error: "No active trip" };
+      const dayNum = Number(args.day) || 1;
+      const opts = { hour: args.hour, weather: args.weather };
+      if (args.use_ai) await WorldPlanner.aiSuggestDay(state, trip, dayNum, opts);
+      else WorldPlanner.localSuggestDay(state, trip, dayNum, opts);
+      persistRefresh(state);
+      return {
+        ok: true,
+        source: args.use_ai ? "ai" : "local",
+        suggestions: (trip.suggestions || []).slice(0, 15).map((s) => ({
+          name: s.name, slot: s.slot, reason: s.reason, placeId: s.placeId,
+        })),
+      };
     }
 
     return { ok: false, error: `Unknown tool: ${name}` };
@@ -1509,7 +1643,7 @@
       for (const call of calls) {
         let result;
         try {
-          result = runTool(call.name, call.args);
+          result = await runTool(call.name, call.args);
         } catch (e) {
           result = { ok: false, error: String(e.message || e) };
         }
@@ -1591,7 +1725,7 @@
       for (const call of calls) {
         let result;
         try {
-          result = runTool(call.name, call.args);
+          result = await runTool(call.name, call.args);
         } catch (e) {
           result = { ok: false, error: String(e.message || e) };
         }
@@ -2054,6 +2188,7 @@
     open: () => openPanel(true),
     undo: doUndo,
     hasKey: () => !!getApiKey(),
+    getApiKey,
     provider: () => providerId,
     model: () => activeModel,
     currentUser: () => currentUser,

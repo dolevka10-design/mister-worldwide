@@ -34,21 +34,26 @@
 
     <div id="app-root" class="app-shell hidden">
       <header class="topbar">
-        <div class="brand-block">
-          <h1 class="brand">Mister Worldwide</h1>
-          <p class="tagline">Rotate the globe · tap a pin · explore your saved places</p>
+        <div class="topbar-row topbar-row-main">
+          <div class="brand-block">
+            <h1 class="brand">Mister Worldwide</h1>
+            <p class="tagline">Rotate the globe · tap a pin · explore your saved places</p>
+          </div>
+          <button class="btn btn-ghost btn-sm topbar-logout" id="btn-logout" type="button">Log out</button>
         </div>
-        <div class="topbar-actions">
+        <div class="topbar-row topbar-row-meta">
           <div class="stats">
             <span><strong id="stat-countries">0</strong> countries</span>
             <span><strong id="stat-places">0</strong> places</span>
           </div>
           <span class="user-chip muted" id="user-chip"></span>
-          <button class="btn btn-ghost" id="btn-export-json" type="button">Export</button>
-          <button class="btn btn-ghost" id="btn-import" type="button">Import</button>
-          <button class="btn btn-danger" id="btn-reset" type="button">Reset</button>
-          <button class="btn btn-ghost" id="btn-logout" type="button">Log out</button>
-          <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden />
+          <div class="topbar-actions">
+            <button class="btn btn-ghost btn-sm" id="btn-planner" type="button">Planner</button>
+            <button class="btn btn-ghost btn-sm" id="btn-export-json" type="button">Export</button>
+            <button class="btn btn-ghost btn-sm" id="btn-import" type="button">Import</button>
+            <button class="btn btn-danger btn-sm" id="btn-reset" type="button">Reset</button>
+            <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden />
+          </div>
         </div>
       </header>
 
@@ -84,10 +89,25 @@
           </button>
           <div class="panel-toolbar" id="panel-filters">
             <input id="place-search" type="search" placeholder="Search places…" class="search-input" />
-            <select id="category-filter" class="pill-select"></select>
+            <div class="filter-row">
+              <select id="city-filter" class="pill-select"></select>
+              <select id="category-filter" class="pill-select"></select>
+            </div>
+            <div class="filter-row">
+              <select id="sort-by" class="pill-select" aria-label="Sort by">
+                <option value="name">Sort: Name</option>
+                <option value="city">Sort: City</option>
+                <option value="category">Sort: Category</option>
+              </select>
+              <select id="sort-order" class="pill-select" aria-label="Order">
+                <option value="asc">A → Z</option>
+                <option value="desc">Z → A</option>
+              </select>
+            </div>
             <div class="view-toggle">
-              <button type="button" class="tab active" id="view-category">By category</button>
-              <button type="button" class="tab" id="view-city">By city</button>
+              <button type="button" class="tab active" id="view-category">Category</button>
+              <button type="button" class="tab" id="view-city">City</button>
+              <button type="button" class="tab" id="view-list">List</button>
             </div>
             <button type="button" class="btn btn-secondary" id="btn-export-csv">Export CSV</button>
           </div>
@@ -95,6 +115,8 @@
         <div id="panel-body" class="panel-body"></div>
       </aside>
     </div>
+
+    <aside id="planner-panel" class="planner-panel" hidden></aside>
 
     <!-- AI Assistant -->
     <button type="button" class="assist-fab" id="assist-fab" aria-label="Open AI assistant">✦</button>
@@ -131,6 +153,7 @@
     <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/globe.gl@2.32.0/dist/globe.gl.min.js"></script>
     <script src="js/globe.js"></script>
+    <script src="js/planner.js"></script>
     <script src="js/app.js"></script>
     <script src="js/assistant.js"></script>
     <script>

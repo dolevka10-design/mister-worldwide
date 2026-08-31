@@ -104,6 +104,17 @@ window.WorldStore = (() => {
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  function recategorizePlaces(state) {
+    if (!state?.places?.length || typeof PlaceCategorize === "undefined") return;
+    for (const p of state.places) {
+      p.category = PlaceCategorize.categorize(p.name, p.description);
+    }
+    const cats = new Set(state.places.map((p) => p.category));
+    state.categories = [...cats].sort((a, b) =>
+      PlaceCategorize.label(a).localeCompare(PlaceCategorize.label(b))
+    );
+  }
+
   function reconcileState(state) {
     if (!state?.places) return state;
     const byId = new Map((state.countries || []).map((c) => [c.id, { ...c }]));
@@ -130,6 +141,8 @@ window.WorldStore = (() => {
 
     state.countries = [...byId.values()];
     for (const c of state.countries) recalcCountry(state, c.id);
+    recategorizePlaces(state);
+    if (!state.planner) state.planner = { trips: [], activeTripId: null };
     return state;
   }
 
@@ -148,7 +161,15 @@ window.WorldStore = (() => {
     }
     const sort = opts.sort || "name";
     if (sort === "city") list.sort((a, b) => a.city.localeCompare(b.city) || a.name.localeCompare(b.name));
-    else list.sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === "category") {
+      list.sort(
+        (a, b) =>
+          PlaceCategorize.label(a.category).localeCompare(PlaceCategorize.label(b.category)) ||
+          a.city.localeCompare(b.city) ||
+          a.name.localeCompare(b.name)
+      );
+    } else list.sort((a, b) => a.name.localeCompare(b.name));
+    if (opts.order === "desc") list.reverse();
     return list;
   }
 
@@ -238,7 +259,7 @@ window.WorldStore = (() => {
 
   return {
     loadSeed, loadState, saveState, defaultState, setUserEmail, uid,
-    nextPlaceId, recalcCountry, reconcileState, countriesForUi, placesByCountry, groupByCity, groupByCategory,
+    nextPlaceId, recalcCountry, reconcileState, recategorizePlaces, countriesForUi, placesByCountry, groupByCity, groupByCategory,
     exportCountryCsv, importCsvPlaces,
   };
 })();

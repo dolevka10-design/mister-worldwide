@@ -38,7 +38,15 @@ Each signed-in user adds their own free API key in the assistant:
 
 Keys sync via Firestore `assistantChats/{uid}`.
 
+Travel planner trips sync in `worldData/{uid}.planner` alongside places and countries.
+
 ## 5. Mobile
 
 The app is a responsive PWA-ready SPA. Add to home screen on iOS/Android after deploy.
 No native build required.
+
+## 6. Troubleshooting
+
+- **Empty country bar / 0 stats on load** — hard refresh; ensure you are on the latest deploy.
+- **Globe blank** — check browser console; ensure `globe.gl` CDN is reachable.
+- **Planner AI** — requires a Groq/OpenRouter key in the assistant; use **Quick suggest** for zero-token local picks.

@@ -6,9 +6,12 @@ window.WorldApp = (() => {
   let user = null;
   let ready = false;
   let selectedCountry = null;
-  let viewMode = "category"; // category | city
+  let viewMode = "category"; // category | city | list
   let filterCategory = "";
+  let filterCity = "";
   let filterQuery = "";
+  let sortBy = "name";
+  let sortOrder = "asc";
 
   const $ = (id) => document.getElementById(id);
 
@@ -28,6 +31,7 @@ window.WorldApp = (() => {
         countries: state.countries,
         places: state.places,
         overrides: state.overrides,
+        planner: state.planner,
         updatedAt: state.updatedAt,
       });
     }
@@ -64,6 +68,7 @@ window.WorldApp = (() => {
   }
 
   function renderStats() {
+    if (!state?.places) return;
     const total = state.places.length;
     const list = countriesForUi(state);
     $("stat-places").textContent = total.toLocaleString();
@@ -72,7 +77,7 @@ window.WorldApp = (() => {
 
   function renderCountryList() {
     const el = $("country-list");
-    if (!el) return;
+    if (!el || !state) return;
     const list = countriesForUi(state);
     el.innerHTML = list
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -110,9 +115,14 @@ window.WorldApp = (() => {
   function selectCountry(countryId) {
     selectedCountry = countryId;
     filterCategory = "";
+    filterCity = "";
     filterQuery = "";
+    sortBy = "name";
+    sortOrder = "asc";
     const q = $("place-search");
     if (q) q.value = "";
+    const citySel = $("city-filter");
+    if (citySel) citySel.value = "";
     WorldGlobe.focusCountry(countryId);
     WorldGlobe.setPinsVisible?.(false);
     renderCountryList();
@@ -133,11 +143,16 @@ window.WorldApp = (() => {
 
     let places = WorldStore.placesByCountry(state, selectedCountry, {
       category: filterCategory || undefined,
+      city: filterCity || undefined,
       query: filterQuery || undefined,
-      sort: viewMode === "city" ? "city" : "name",
+      sort: sortBy,
+      order: sortOrder,
     });
 
-    const cats = [...new Set(WorldStore.placesByCountry(state, selectedCountry).map((p) => p.category))];
+    const allInCountry = WorldStore.placesByCountry(state, selectedCountry);
+    const cats = [...new Set(allInCountry.map((p) => p.category))];
+    const cities = [...new Set(allInCountry.map((p) => p.city))].sort();
+
     const catFilter = $("category-filter");
     if (catFilter) {
       catFilter.innerHTML = `<option value="">All categories</option>` +
@@ -145,6 +160,18 @@ window.WorldApp = (() => {
           .map((c) => `<option value="${c}" ${filterCategory === c ? "selected" : ""}>${PlaceCategorize.label(c)}</option>`)
           .join("");
     }
+
+    const cityFilter = $("city-filter");
+    if (cityFilter) {
+      cityFilter.innerHTML = `<option value="">All cities</option>` +
+        cities.map((c) => `<option value="${esc(c)}" ${filterCity === c ? "selected" : ""}>${esc(c)}</option>`)
+          .join("");
+    }
+
+    const sortSel = $("sort-by");
+    if (sortSel) sortSel.value = sortBy;
+    const orderSel = $("sort-order");
+    if (orderSel) orderSel.value = sortOrder;
 
     const body = $("panel-body");
     if (!body) return;
@@ -157,6 +184,8 @@ window.WorldApp = (() => {
           <ul class="place-list">${items.map(placeCard).join("")}</ul>
         </section>
       `).join("") || emptyMsg();
+    } else if (viewMode === "list") {
+      body.innerHTML = `<ul class="place-list">${places.map(placeCard).join("")}</ul>` || emptyMsg();
     } else {
       const groups = WorldStore.groupByCategory(places);
       body.innerHTML = groups.map(([cat, items]) => `
@@ -175,7 +204,10 @@ window.WorldApp = (() => {
           <strong>${esc(p.name)}</strong>
           <span class="place-meta">${esc(p.city)} · ${PlaceCategorize.label(p.category)}</span>
         </div>
-        ${p.url ? `<a class="place-link" href="${esc(p.url)}" target="_blank" rel="noopener">Maps</a>` : ""}
+        <div class="place-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-add-trip="${esc(p.id)}" title="Add to trip">+ Trip</button>
+          ${p.url ? `<a class="place-link" href="${esc(p.url)}" target="_blank" rel="noopener">Maps</a>` : ""}
+        </div>
       </li>`;
   }
 
@@ -220,18 +252,49 @@ window.WorldApp = (() => {
       viewMode = "category";
       $("view-category").classList.add("active");
       $("view-city").classList.remove("active");
+      $("view-list")?.classList.remove("active");
       renderCountryPanel();
     });
     $("view-city")?.addEventListener("click", () => {
       viewMode = "city";
       $("view-city").classList.add("active");
       $("view-category").classList.remove("active");
+      $("view-list")?.classList.remove("active");
+      renderCountryPanel();
+    });
+    $("view-list")?.addEventListener("click", () => {
+      viewMode = "list";
+      $("view-list").classList.add("active");
+      $("view-category").classList.remove("active");
+      $("view-city").classList.remove("active");
       renderCountryPanel();
     });
 
     $("category-filter")?.addEventListener("change", (e) => {
       filterCategory = e.target.value;
       renderCountryPanel();
+    });
+
+    $("city-filter")?.addEventListener("change", (e) => {
+      filterCity = e.target.value;
+      renderCountryPanel();
+    });
+
+    $("sort-by")?.addEventListener("change", (e) => {
+      sortBy = e.target.value;
+      renderCountryPanel();
+    });
+
+    $("sort-order")?.addEventListener("change", (e) => {
+      sortOrder = e.target.value;
+      renderCountryPanel();
+    });
+
+    $("panel-body")?.addEventListener("click", (e) => {
+      const btn = e.target.closest?.("[data-add-trip]");
+      if (!btn) return;
+      const place = state.places.find((p) => p.id === btn.dataset.addTrip);
+      if (place) WorldPlanner.showAddToTripMenu(place);
     });
 
     $("place-search")?.addEventListener("input", (e) => {
@@ -314,6 +377,7 @@ window.WorldApp = (() => {
 
     if (!remote.places?.length && local?.places?.length) next.places = local.places;
     if (!remote.countries?.length && local?.countries?.length) next.countries = local.countries;
+    if (!remote.planner?.trips?.length && local?.planner?.trips?.length) next.planner = local.planner;
 
     return WorldStore.reconcileState(next);
   }
@@ -411,6 +475,7 @@ window.WorldApp = (() => {
       WorldStore.setUserEmail(u.email);
       $("user-chip").textContent = u.email || u.displayName || "Signed in";
       showAuth(false);
+      refresh();
       const cloud = await WorldCloud.loadFromCloud(u.uid);
       const local = WorldStore.reconcileState(WorldStore.loadState());
       if (cloud?.places?.length) {
@@ -447,6 +512,7 @@ window.WorldApp = (() => {
     await WorldStore.loadSeed();
     state = WorldStore.reconcileState(WorldStore.loadState());
     CountryMeta.init(state.countries);
+    refresh();
 
     if (!WorldCloud.configured) {
       $("auth-config-hint").hidden = false;
@@ -465,6 +531,8 @@ window.WorldApp = (() => {
       if (err) toast(err.message, "error");
       await onUser(u);
     });
+
+    WorldPlanner?.init?.();
   }
 
   return {
