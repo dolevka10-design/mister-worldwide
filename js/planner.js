@@ -374,7 +374,8 @@ window.WorldPlanner = (() => {
       <input type="hidden" id="planner-day" value="${dayNum}" />`;
   }
 
-  function render(state) {
+  function render(stateIn) {
+    const state = stateIn || WorldApp.getState();
     const panel = $("planner-panel");
     if (!panel) return;
     const trip = getActiveTrip(state);
@@ -397,7 +398,7 @@ window.WorldPlanner = (() => {
 
     $("planner-trip")?.addEventListener("change", (e) => {
       setActiveTrip(state, e.target.value);
-      WorldApp.persist();
+      WorldApp.persistPlanner();
       render(state);
     });
 
@@ -413,7 +414,7 @@ window.WorldPlanner = (() => {
         segments: [{ countryId, city, startDate, endDate }],
         dayCount: startDate && endDate ? daysBetween(startDate, endDate) + 1 : 3,
       });
-      WorldApp.persist();
+      WorldApp.persistPlanner();
       WorldApp.refresh();
       render(state);
     });
@@ -428,7 +429,7 @@ window.WorldPlanner = (() => {
       if (!trip) return;
       trip.startDate = $("planner-start").value;
       rebuildDays(trip);
-      WorldApp.persist();
+      WorldApp.persistPlanner();
       render(state);
     });
 
@@ -437,7 +438,7 @@ window.WorldPlanner = (() => {
       if (!trip) return;
       trip.endDate = $("planner-end").value;
       rebuildDays(trip);
-      WorldApp.persist();
+      WorldApp.persistPlanner();
       render(state);
     });
 
@@ -458,7 +459,7 @@ window.WorldPlanner = (() => {
         startDate: $("seg-start")?.value,
         endDate: $("seg-end")?.value,
       });
-      WorldApp.persist();
+      WorldApp.persistPlanner();
       render(state);
       WorldApp.toast("Segment added");
     });
@@ -468,7 +469,7 @@ window.WorldPlanner = (() => {
       const d = Number($("planner-day")?.value) || dayNum || 1;
       if (!trip) return;
       localSuggestDay(state, trip, d);
-      WorldApp.persist();
+      WorldApp.persistPlanner();
       render(state);
       WorldApp.toast("Suggestions ready");
     });
@@ -479,7 +480,7 @@ window.WorldPlanner = (() => {
       if (!trip) return;
       WorldApp.toast("Getting suggestions…");
       await aiSuggestDay(state, trip, d, { hour: new Date().getHours() });
-      WorldApp.persist();
+      WorldApp.persistPlanner();
       render(state);
     });
 
@@ -490,7 +491,7 @@ window.WorldPlanner = (() => {
         const sug = trip?.suggestions?.find((s) => s.id === btn.dataset.adoptSug);
         if (!sug) return;
         adoptSuggestion(state, trip.id, sug, d);
-        WorldApp.persist();
+        WorldApp.persistPlanner();
         render(state);
       });
     });
@@ -501,7 +502,7 @@ window.WorldPlanner = (() => {
         const d = Number($("planner-day")?.value) || dayNum || 1;
         if (!trip) return;
         removeEntry(state, trip.id, d, btn.dataset.slot, btn.dataset.removeEntry);
-        WorldApp.persist();
+        WorldApp.persistPlanner();
         render(state);
       });
     });
@@ -525,7 +526,7 @@ window.WorldPlanner = (() => {
     if (!slot || !SLOTS.some((s) => s.id === slot)) return;
     const note = prompt("Note (breakfast, drinks, show…)", "") || "";
     addPlace(state, trip.id, Math.min(trip.dayCount, Math.max(1, dayNum)), slot, place, note);
-    WorldApp.persist();
+    WorldApp.persistPlanner();
     WorldApp.toast(`Added to day ${dayNum}`);
   }
 

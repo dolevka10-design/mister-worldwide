@@ -38,7 +38,7 @@ Each signed-in user adds their own free API key in the assistant:
 
 Keys sync via Firestore `assistantChats/{uid}`.
 
-Travel planner trips sync in `worldData/{uid}.planner` alongside places and countries.
+Travel planner trips sync in real time via Firestore `worldData/{uid}.planner` and `plannerUpdatedAt` (merged across PC, phone, and other devices alongside places and countries).
 
 ### Import Google Maps / Takeout
 

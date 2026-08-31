@@ -19,6 +19,8 @@ window.WorldStore = (() => {
       places,
       categories: seed?.categories || [],
       overrides: {},
+      planner: { trips: [], activeTripId: null, updatedAt: null },
+      plannerUpdatedAt: null,
       updatedAt: new Date().toISOString(),
     };
   }
@@ -34,6 +36,8 @@ window.WorldStore = (() => {
         ...parsed,
         countries: parsed.countries?.length ? parsed.countries : base.countries,
         places: parsed.places?.length ? parsed.places : base.places,
+        planner: parsed.planner || base.planner,
+        plannerUpdatedAt: parsed.plannerUpdatedAt || parsed.planner?.updatedAt || null,
       };
     } catch {
       return defaultState();
@@ -144,6 +148,80 @@ window.WorldStore = (() => {
     recategorizePlaces(state);
     if (!state.planner) state.planner = { trips: [], activeTripId: null };
     return state;
+  }
+
+  function emptyPlanner() {
+    return { trips: [], activeTripId: null, updatedAt: null };
+  }
+
+  function touchPlanner(state) {
+    if (!state) return state;
+    if (!state.planner) state.planner = emptyPlanner();
+    const ts = new Date().toISOString();
+    state.planner.updatedAt = ts;
+    state.plannerUpdatedAt = ts;
+    return state;
+  }
+
+  function plannerTimestamp(planner, fallback) {
+    const t = planner?.updatedAt || fallback;
+    const ms = Date.parse(t || "");
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function mergePlanner(local, remote) {
+    const l = local?.trips?.length ? local : emptyPlanner();
+    const r = remote?.trips?.length ? remote : emptyPlanner();
+    const lMs = plannerTimestamp(l, null);
+    const rMs = plannerTimestamp(r, null);
+
+    if (!l.trips?.length && r.trips?.length) {
+      return { ...r, trips: [...r.trips], activeTripId: r.activeTripId || r.trips[0]?.id || null };
+    }
+    if (l.trips?.length && !r.trips?.length) {
+      return { ...l, trips: [...l.trips], activeTripId: l.activeTripId || l.trips[0]?.id || null };
+    }
+    if (!l.trips?.length && !r.trips?.length) return emptyPlanner();
+
+    if (rMs > lMs) {
+      return { ...r, trips: [...r.trips], activeTripId: r.activeTripId || l.activeTripId || r.trips[0]?.id || null };
+    }
+    if (lMs > rMs) {
+      return { ...l, trips: [...l.trips], activeTripId: l.activeTripId || r.activeTripId || l.trips[0]?.id || null };
+    }
+
+    const byId = new Map();
+    for (const trip of l.trips) byId.set(trip.id, { ...trip });
+    for (const trip of r.trips) {
+      const prev = byId.get(trip.id);
+      byId.set(trip.id, prev ? { ...prev, ...trip } : { ...trip });
+    }
+    const trips = [...byId.values()].sort((a, b) => {
+      const ad = Date.parse(a.createdAt || a.startDate || "") || 0;
+      const bd = Date.parse(b.createdAt || b.startDate || "") || 0;
+      return bd - ad;
+    });
+    const updatedAt = new Date(Math.max(lMs, rMs, Date.now())).toISOString();
+    return {
+      trips,
+      activeTripId: r.activeTripId || l.activeTripId || trips[0]?.id || null,
+      updatedAt,
+    };
+  }
+
+  function packCloudPayload(state) {
+    return {
+      countries: state.countries,
+      places: state.places,
+      overrides: state.overrides || {},
+      planner: state.planner || emptyPlanner(),
+      plannerUpdatedAt: state.plannerUpdatedAt || state.planner?.updatedAt || null,
+      updatedAt: state.updatedAt,
+    };
+  }
+
+  function hasCloudData(remote) {
+    return !!(remote?.places?.length || remote?.planner?.trips?.length || remote?.countries?.length);
   }
 
   function placesByCountry(state, countryId, opts = {}) {
@@ -261,5 +339,6 @@ window.WorldStore = (() => {
     loadSeed, loadState, saveState, defaultState, setUserEmail, uid,
     nextPlaceId, recalcCountry, reconcileState, recategorizePlaces, countriesForUi, placesByCountry, groupByCity, groupByCategory,
     exportCountryCsv, importCsvPlaces,
+    emptyPlanner, touchPlanner, mergePlanner, packCloudPayload, hasCloudData,
   };
 })();

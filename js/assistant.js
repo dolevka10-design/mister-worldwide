@@ -707,11 +707,14 @@
     if (undoStack.length > MAX_UNDO) undoStack.shift();
   }
 
-  function persistRefresh(state) {
+  function persistRefresh(state, { touchPlanner } = {}) {
     const api = window.WorldApp;
-    api.setState(state);
-    api.persist();
-    api.refresh();
+    api.setState(state, { skipPersist: true });
+    if (touchPlanner) api.persistPlanner();
+    else {
+      api.persist();
+      api.refresh();
+    }
   }
 
   function appendBubble(text, who, track = true) {
@@ -1036,7 +1039,7 @@
         name: args.name,
         dayCount: Number(args.days) || 3,
       });
-      persistRefresh(state);
+      persistRefresh(state, { touchPlanner: true });
       return { ok: true, trip: { id: trip.id, name: trip.name, city: trip.city, dayCount: trip.dayCount } };
     }
 
@@ -1050,7 +1053,7 @@
       if (!trip) return { ok: false, error: "No active trip — create one first" };
       snapshot(`Add ${place.name} to day ${args.day}`);
       WorldPlanner.addPlace(state, trip.id, Number(args.day) || 1, args.slot, place, args.note || "");
-      persistRefresh(state);
+      persistRefresh(state, { touchPlanner: true });
       return { ok: true, added: place.name, day: args.day, slot: args.slot };
     }
 
@@ -1064,7 +1067,7 @@
       const opts = { hour: args.hour, weather: args.weather };
       if (args.use_ai) await WorldPlanner.aiSuggestDay(state, trip, dayNum, opts);
       else WorldPlanner.localSuggestDay(state, trip, dayNum, opts);
-      persistRefresh(state);
+      persistRefresh(state, { touchPlanner: true });
       return {
         ok: true,
         source: args.use_ai ? "ai" : "local",
@@ -1086,7 +1089,7 @@
       WorldPlanner.addSegment(state, trip.id, {
         countryId, city: args.city, startDate: args.start_date, endDate: args.end_date,
       });
-      persistRefresh(state);
+      persistRefresh(state, { touchPlanner: true });
       return { ok: true, segments: trip.segments.length };
     }
 

@@ -24,20 +24,20 @@ window.WorldApp = (() => {
     el._t = setTimeout(() => el.classList.remove("show"), 3200);
   }
 
-  function persist() {
+  function persist({ touchPlanner } = {}) {
+    if (touchPlanner) WorldStore.touchPlanner(state);
     WorldStore.saveState(state);
     if (user?.uid && WorldCloud.configured) {
-      WorldCloud.scheduleSave(user.uid, {
-        countries: state.countries,
-        places: state.places,
-        overrides: state.overrides,
-        planner: state.planner,
-        updatedAt: state.updatedAt,
-      });
+      WorldCloud.scheduleSave(user.uid, WorldStore.packCloudPayload(state));
     }
     WorldGlobe.updatePins(countriesForUi(state));
     renderCountryPanel();
     renderStats();
+  }
+
+  function persistPlanner() {
+    persist({ touchPlanner: true });
+    WorldPlanner?.render?.(state);
   }
 
   function getState() { return state; }
@@ -61,6 +61,7 @@ window.WorldApp = (() => {
     } else if (!$("app-root")?.classList.contains("hidden")) {
       ensureGlobe();
     }
+    WorldPlanner?.render?.(state);
   }
 
   function countriesForUi(state) {
@@ -328,7 +329,8 @@ window.WorldApp = (() => {
           const parsed = JSON.parse(text);
           if (parsed.places && parsed.countries) {
             state = { ...state, ...parsed };
-            persist();
+            if (parsed.planner) WorldStore.touchPlanner(state);
+            persist(parsed.planner ? { touchPlanner: true } : {});
             toast("JSON imported");
           } else throw new Error("Invalid JSON");
         }
@@ -369,15 +371,22 @@ window.WorldApp = (() => {
       countries.set(c.id, prev ? { ...prev, ...c } : { ...c });
     }
 
+    const mergedPlanner = WorldStore.mergePlanner(local?.planner, remote?.planner);
+    const plannerUpdatedAt = mergedPlanner.updatedAt
+      || remote?.plannerUpdatedAt
+      || local?.plannerUpdatedAt
+      || null;
+
     const next = {
       ...local,
       ...remote,
       countries: [...countries.values()],
+      planner: mergedPlanner,
+      plannerUpdatedAt,
     };
 
     if (!remote.places?.length && local?.places?.length) next.places = local.places;
     if (!remote.countries?.length && local?.countries?.length) next.countries = local.countries;
-    if (!remote.planner?.trips?.length && local?.planner?.trips?.length) next.planner = local.planner;
 
     return WorldStore.reconcileState(next);
   }
@@ -478,15 +487,14 @@ window.WorldApp = (() => {
       refresh();
       const cloud = await WorldCloud.loadFromCloud(u.uid);
       const local = WorldStore.reconcileState(WorldStore.loadState());
-      if (cloud?.places?.length) {
+      if (WorldStore.hasCloudData(cloud)) {
         state = mergeCloudState(local, cloud);
       } else {
         state = local;
-        WorldCloud.scheduleSave(u.uid, state);
+        WorldCloud.scheduleSave(u.uid, WorldStore.packCloudPayload(state));
       }
       WorldStore.saveState(state);
       WorldCloud.listenCloud(u.uid, (remote) => {
-        if (WorldCloud.isApplyingRemote()) return;
         state = mergeCloudState(state, remote);
         WorldStore.saveState(state);
         refresh();
@@ -537,7 +545,7 @@ window.WorldApp = (() => {
   }
 
   return {
-    start, ready: () => ready, getState, setState, cloneState, persist, refresh, toast,
+    start, ready: () => ready, getState, setState, cloneState, persist, persistPlanner, refresh, toast,
     selectCountry, get selectedCountry() { return selectedCountry; },
   };
 })();
