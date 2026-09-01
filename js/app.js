@@ -12,6 +12,9 @@ window.WorldApp = (() => {
   let filterQuery = "";
   let sortBy = "name";
   let sortOrder = "asc";
+  let placeIdFilter = null;
+  let dayPanelLabel = "";
+  let placeIdOrder = [];
 
   const $ = (id) => document.getElementById(id);
 
@@ -118,7 +121,14 @@ window.WorldApp = (() => {
     return Math.max(140, Math.round(list.clientWidth * 0.72));
   }
 
-  function selectCountry(countryId) {
+  function clearDayPlaceFilter() {
+    placeIdFilter = null;
+    dayPanelLabel = "";
+    placeIdOrder = [];
+  }
+
+  function selectCountry(countryId, { keepDayFilter = false } = {}) {
+    if (!keepDayFilter) clearDayPlaceFilter();
     selectedCountry = countryId;
     filterCategory = "";
     filterCity = "";
@@ -136,6 +146,30 @@ window.WorldApp = (() => {
     $("country-panel")?.classList.add("open");
   }
 
+  function showDayPlacesOnCountry(countryId, placeIds, { city, label, order } = {}) {
+    const ids = (placeIds || []).filter(Boolean);
+    placeIdFilter = ids.length ? new Set(ids) : null;
+    placeIdOrder = order?.length ? order.filter((id) => ids.includes(id)) : ids;
+    dayPanelLabel = label || "";
+    selectedCountry = countryId;
+    filterCategory = "";
+    filterQuery = "";
+    sortBy = "name";
+    sortOrder = "asc";
+    if (city) filterCity = city;
+    else filterCity = "";
+    const q = $("place-search");
+    if (q) q.value = "";
+    viewMode = "list";
+    document.querySelectorAll(".view-toggle .tab").forEach((t) => t.classList.remove("active"));
+    $("view-list")?.classList.add("active");
+    WorldGlobe.setPinsVisible?.(false);
+    renderCountryList();
+    renderCountryPanel();
+    $("country-panel")?.classList.add("open");
+    $("app-root")?.classList.remove("hidden");
+  }
+
   function renderCountryPanel() {
     const panel = $("country-panel");
     if (!panel || !selectedCountry) return;
@@ -145,7 +179,6 @@ window.WorldApp = (() => {
     $("panel-flag").src = CountryMeta.flagUrl(country.iso, 80);
     $("panel-flag").alt = country.name;
     $("panel-title").textContent = country.name;
-    $("panel-count").textContent = `${country.placeCount} saved places`;
 
     let places = WorldStore.placesByCountry(state, selectedCountry, {
       category: filterCategory || undefined,
@@ -154,6 +187,17 @@ window.WorldApp = (() => {
       sort: sortBy,
       order: sortOrder,
     });
+
+    if (placeIdFilter?.size) {
+      places = places.filter((p) => placeIdFilter.has(p.id));
+      if (placeIdOrder.length) {
+        const rank = new Map(placeIdOrder.map((id, i) => [id, i]));
+        places.sort((a, b) => (rank.get(a.id) ?? 9999) - (rank.get(b.id) ?? 9999));
+      }
+      $("panel-count").textContent = dayPanelLabel || `${places.length} place${places.length === 1 ? "" : "s"} on this day`;
+    } else {
+      $("panel-count").textContent = `${country.placeCount} saved places`;
+    }
 
     const allInCountry = WorldStore.placesByCountry(state, selectedCountry);
     const cats = [...new Set(allInCountry.map((p) => p.category))];
@@ -182,25 +226,39 @@ window.WorldApp = (() => {
     const body = $("panel-body");
     if (!body) return;
 
+    const dayBanner = placeIdFilter?.size
+      ? `<div class="day-place-filter-banner">
+          <span>${esc(dayPanelLabel || "Day places")}</span>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-day-filter">Show all</button>
+        </div>`
+      : "";
+
+    let bodyHtml = "";
     if (viewMode === "city") {
       const groups = WorldStore.groupByCity(places);
-      body.innerHTML = groups.map(([city, items]) => `
+      bodyHtml = groups.map(([city, items]) => `
         <section class="place-group">
           <h3 class="group-title">${city} <span class="muted">(${items.length})</span></h3>
           <ul class="place-list">${items.map(placeCard).join("")}</ul>
         </section>
       `).join("") || emptyMsg();
     } else if (viewMode === "list") {
-      body.innerHTML = `<ul class="place-list">${places.map(placeCard).join("")}</ul>` || emptyMsg();
+      bodyHtml = `<ul class="place-list">${places.map(placeCard).join("")}</ul>` || emptyMsg();
     } else {
       const groups = WorldStore.groupByCategory(places);
-      body.innerHTML = groups.map(([cat, items]) => `
+      bodyHtml = groups.map(([cat, items]) => `
         <section class="place-group">
           <h3 class="group-title">${PlaceCategorize.label(cat)} <span class="muted">(${items.length})</span></h3>
           <ul class="place-list">${items.map(placeCard).join("")}</ul>
         </section>
       `).join("") || emptyMsg();
     }
+    body.innerHTML = dayBanner + bodyHtml;
+    $("btn-clear-day-filter")?.addEventListener("click", () => {
+      clearDayPlaceFilter();
+      WorldGlobe.restoreCountryPins?.();
+      renderCountryPanel();
+    });
   }
 
   function placeCard(p) {
@@ -229,6 +287,8 @@ window.WorldApp = (() => {
     $("btn-close-panel")?.addEventListener("click", () => {
       $("country-panel")?.classList.remove("open");
       selectedCountry = null;
+      clearDayPlaceFilter();
+      WorldGlobe.restoreCountryPins?.();
       WorldGlobe.setPinsVisible?.(true);
       renderCountryList();
     });
@@ -590,7 +650,7 @@ window.WorldApp = (() => {
   return {
     start, ready: () => ready, getState, setState, cloneState, persist, persistPlanner, refresh, toast,
     getUser: () => user,
-    selectCountry, get selectedCountry() { return selectedCountry; },
+    selectCountry, showDayPlacesOnCountry, get selectedCountry() { return selectedCountry; },
   };
 })();
 

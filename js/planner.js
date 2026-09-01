@@ -33,6 +33,7 @@ window.WorldPlanner = (() => {
   let lastActionAt = 0;
   let lastActionKey = "";
   let lastTouchKey = "";
+  let touchTrack = null;
 
   function handleAction(actEl, e) {
     if (!actEl?.dataset?.act || actEl.disabled) return;
@@ -54,9 +55,42 @@ window.WorldPlanner = (() => {
     const panel = $("planner-panel");
     if (!panel || panel.hidden || !open) return;
     if (!panel.contains(e.target)) return;
-    if (e.target.closest("input, textarea, select, option, a.place-link")) return;
+
+    if (e.type === "touchstart") {
+      const scrollEl = e.target.closest(".day-nav-chips, .planner-trip-chips");
+      if (scrollEl && e.touches?.[0]) {
+        touchTrack = {
+          el: scrollEl,
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+          moved: false,
+        };
+      }
+      return;
+    }
+    if (e.type === "touchmove") {
+      if (touchTrack && e.touches?.[0]) {
+        const dx = Math.abs(e.touches[0].clientX - touchTrack.x);
+        const dy = Math.abs(e.touches[0].clientY - touchTrack.y);
+        if (dx > 10 || dy > 10) touchTrack.moved = true;
+      }
+      return;
+    }
+
+    if (e.target.closest("input, textarea, select, option, a.place-link")) {
+      touchTrack = null;
+      return;
+    }
     const actEl = e.target.closest("button[data-act], .trip-chip[data-act], summary[data-act]");
-    if (!actEl || actEl.disabled) return;
+    if (!actEl || actEl.disabled) {
+      touchTrack = null;
+      return;
+    }
+    if (e.type === "touchend" && touchTrack?.moved && touchTrack.el?.contains(e.target)) {
+      touchTrack = null;
+      return;
+    }
+    touchTrack = null;
     if (e.type === "touchend") e.preventDefault();
     handleAction(actEl, e);
   }
@@ -165,6 +199,26 @@ window.WorldPlanner = (() => {
     return Math.min(max, Math.max(1, n || 1));
   }
 
+  function normalizeTripDays(trip) {
+    if (!trip?.days?.length) return;
+    trip.days.forEach((d, i) => {
+      const seq = i + 1;
+      if (d.day != null && d.day !== seq) d.importDay = d.importDay ?? d.day;
+      d.day = seq;
+    });
+  }
+
+  function dayListMode(trip) {
+    return trip?.dayListMode === "timeline" ? "timeline" : "category";
+  }
+
+  function scrollActiveDayChip() {
+    requestAnimationFrame(() => {
+      const chip = document.querySelector(".day-nav-chip.active");
+      chip?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+    });
+  }
+
   function categoryIcon(cat) {
     const icons = {
       restaurant: "🍽️", cafe: "☕", landmark: "📍", museum: "🏛️", hotel: "🏨", bar: "🍸",
@@ -260,6 +314,7 @@ window.WorldPlanner = (() => {
     } else {
       rebuildDays(trip);
     }
+    normalizeTripDays(trip);
     return trip;
   }
 
@@ -692,7 +747,8 @@ window.WorldPlanner = (() => {
           return itemFromRow(row, rowSeg?.countryId, rowCountry?.name || country?.name, rowCity);
         });
         return {
-          day: plan.day || (i + 1),
+          day: i + 1,
+          importDay: plan.day || null,
           date: plan.date,
           segmentId: seg?.id || null,
           items,
@@ -740,17 +796,33 @@ window.WorldPlanner = (() => {
   }
 
   function showDayOnGlobe(state, trip, dayNum) {
-    const places = dayPlacesForMap(state, trip, dayNum);
+    const day = trip.days?.[dayNum - 1];
+    if (!day) return;
     const seg = segmentForDay(trip, dayNum);
-    if (places.length) {
-      WorldGlobe.showDayPlaces?.(places);
-      WorldApp.toast(`Showing ${places.length} location${places.length === 1 ? "" : "s"} on globe`);
+    const mapPlaces = dayPlacesForMap(state, trip, dayNum);
+    const placeIds = itemsOf(day).map((item) => item.placeId).filter(Boolean);
+    const city = seg?.city && seg.city !== "Other" ? seg.city : "";
+
+    toggle(false);
+
+    if (mapPlaces.length) {
+      WorldGlobe.showDayPlaces?.(mapPlaces);
     } else if (seg?.countryId) {
-      WorldApp.selectCountry(seg.countryId);
-      WorldGlobe.focusCountry(seg.countryId);
-      WorldApp.toast("No map coordinates yet — showing country on globe");
+      WorldGlobe.focusCountry?.(seg.countryId);
+    }
+
+    if (seg?.countryId) {
+      WorldApp.showDayPlacesOnCountry?.(seg.countryId, placeIds, {
+        city,
+        label: `Day ${dayNum}${day.date ? ` · ${fmtDate(day.date)}` : ""}`,
+        order: placeIds,
+      });
+      const n = placeIds.length || mapPlaces.length;
+      WorldApp.toast(n
+        ? `Globe · ${n} place${n === 1 ? "" : "s"} for day ${dayNum}`
+        : "Globe · open country to add places for this day");
     } else {
-      WorldApp.toast("Add Maps URLs to activities to show them on the globe", "warn");
+      WorldApp.toast("Add a country to this trip location to show places on the globe", "warn");
     }
   }
 
@@ -960,6 +1032,7 @@ window.WorldPlanner = (() => {
     if (persist) WorldApp.persistPlanner({ skipPlannerRender: true });
     render(state);
     scrollPlannerToDay();
+    scrollActiveDayChip();
   }
 
   function renderTripNavBar(state, trip) {
@@ -1010,11 +1083,36 @@ window.WorldPlanner = (() => {
       </section>`;
   }
 
-  function renderActivityRow(item, day) {
-    return `<button type="button" class="activity-row" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${day.day}">
+  function renderActivityRow(item, dayNum, { showCategory = false } = {}) {
+    const catLabel = item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category);
+    return `<div class="activity-row">
+      ${showCategory ? `<span class="activity-row-cat">${categoryIcon(item.category)}</span>` : ""}
       <span class="activity-row-text">${esc(item.name || "Activity")}</span>
       ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
-    </button>`;
+      <button type="button" class="activity-row-detail" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Activity details">ⓘ</button>
+    </div>`;
+  }
+
+  function renderDayActivities(state, trip, day, dayNum) {
+    const items = itemsOf(day);
+    if (!items.length) return '<p class="muted day-empty">No activities yet — add one below.</p>';
+    if (dayListMode(trip) === "timeline") {
+      return `<div class="activity-list activity-list-timeline">
+        ${items.map((item, i) => `
+          <div class="activity-timeline-row">
+            <span class="activity-timeline-num">${i + 1}</span>
+            ${renderActivityRow(item, dayNum, { showCategory: true })}
+          </div>`).join("")}
+      </div>`;
+    }
+    const groups = groupItemsByCategory(items);
+    return groups.map((g) => `
+      <section class="day-category-section card">
+        <h3 class="day-category-title">${categoryIcon(g.category)} ${esc(PlaceCategorize.plannerLabel(g.category))}</h3>
+        <div class="activity-list activity-list-rows">
+          ${g.items.map((item) => renderActivityRow(item, dayNum)).join("")}
+        </div>
+      </section>`).join("");
   }
 
   function hideActivityDetail() {
@@ -1122,12 +1220,12 @@ window.WorldPlanner = (() => {
       seg?.city && seg.city !== "Other" ? seg.city : "",
       country?.name || "",
     ].filter(Boolean).join(" · ");
-    const groups = groupItemsByCategory(itemsOf(day));
     const total = trip.days?.length || 0;
+    const listMode = dayListMode(trip);
     return `
       <section class="day-page" id="planner-day-page">
         <header class="day-page-head card">
-          <p class="day-page-kicker">Day ${dayNum} of ${total}</p>
+          <p class="day-page-kicker">Day ${dayNum} of ${total}${day.importDay && day.importDay !== dayNum ? ` <span class="muted">(itinerary day ${esc(String(day.importDay))})</span>` : ""}</p>
           <h2 class="day-page-title">${esc(headline)}</h2>
         </header>
         <nav class="day-nav-bar" aria-label="Day navigation">
@@ -1135,38 +1233,42 @@ window.WorldPlanner = (() => {
           <label class="day-jump-field">
             <span class="sr-only">Jump to day</span>
             <select class="pill-select day-jump-select" id="day-jump-select" data-act="day-select">
-              ${(trip.days || []).map((d) => {
-                const seg = segmentForDay(trip, d.day);
+              ${(trip.days || []).map((d, i) => {
+                const n = i + 1;
+                const seg = segmentForDay(trip, n);
                 const country = state.countries.find((c) => c.id === seg?.countryId);
                 const label = [
-                  `Day ${d.day}`,
+                  `Day ${n}`,
                   d.date ? fmtDate(d.date) : "",
                   seg?.city && seg.city !== "Other" ? seg.city : "",
                   country?.name || "",
                 ].filter(Boolean).join(" · ");
-                return `<option value="${d.day}" ${d.day === dayNum ? "selected" : ""}>${esc(label)}</option>`;
+                return `<option value="${n}" ${n === dayNum ? "selected" : ""}>${esc(label)}</option>`;
               }).join("")}
             </select>
           </label>
           <button type="button" class="btn btn-ghost btn-sm day-nav-arrow" data-act="day-next" ${dayNum >= total ? "disabled" : ""}>→</button>
         </nav>
         <div class="day-nav-chips" role="tablist" aria-label="Day chips">
-          ${(trip.days || []).map((d) => `
-            <button type="button" role="tab" class="day-nav-chip ${d.day === dayNum ? "active" : ""}" data-act="day-go" data-day="${d.day}" aria-selected="${d.day === dayNum}">
-              ${d.date ? esc(fmtDate(d.date)) : `D${d.day}`}
-            </button>`).join("")}
+          ${(trip.days || []).map((d, i) => {
+            const n = i + 1;
+            return `<button type="button" role="tab" class="day-nav-chip ${n === dayNum ? "active" : ""}" data-act="day-go" data-day="${n}" aria-selected="${n === dayNum}">
+              ${d.date ? esc(fmtDate(d.date)) : `D${n}`}
+            </button>`;
+          }).join("")}
+        </div>
+        <div class="day-layout-bar">
+          <span class="muted day-layout-label">View</span>
+          <div class="day-layout-toggle" role="group" aria-label="Day list layout">
+            <button type="button" class="day-layout-btn ${listMode === "category" ? "active" : ""}" data-act="day-layout" data-layout="category">Categories</button>
+            <button type="button" class="day-layout-btn ${listMode === "timeline" ? "active" : ""}" data-act="day-layout" data-layout="timeline">Timeline</button>
+          </div>
         </div>
         <div class="day-map-bar card">
-          <button type="button" class="btn btn-secondary" data-act="day-map" data-day="${day.day}">🌍 Map this day on globe</button>
+          <button type="button" class="btn btn-secondary" data-act="day-map" data-day="${dayNum}">🌍 Map this day on globe</button>
         </div>
         <div class="day-sections">
-          ${groups.length ? groups.map((g) => `
-            <section class="day-category-section card">
-              <h3 class="day-category-title">${categoryIcon(g.category)} ${esc(PlaceCategorize.plannerLabel(g.category))}</h3>
-              <div class="activity-list activity-list-rows">
-                ${g.items.map((item) => renderActivityRow(item, day)).join("")}
-              </div>
-            </section>`).join("") : '<p class="muted day-empty">No activities yet — add one below.</p>'}
+          ${renderDayActivities(state, trip, day, dayNum)}
         </div>
         ${renderDayAddForm(day)}
       </section>`;
@@ -1287,6 +1389,7 @@ window.WorldPlanner = (() => {
       if (b && lastScroll) b.scrollTop = lastScroll;
     });
     wirePlannerActions();
+    if (showTrip) scrollActiveDayChip();
     return state;
   }
 
@@ -1333,6 +1436,7 @@ window.WorldPlanner = (() => {
     WorldStore.saveState(state);
     render(state);
     scrollPlannerToDay();
+    scrollActiveDayChip();
     WorldApp.persist({ touchPlanner: true });
     if (flush && WorldCloud?.configured) {
       setTimeout(() => {
@@ -1453,6 +1557,12 @@ window.WorldPlanner = (() => {
     if (act === "day-map") {
       if (!trip) return;
       return showDayOnGlobe(state, trip, Number(actEl.dataset.day) || activeDayNum);
+    }
+    if (act === "day-layout") {
+      if (!trip) return;
+      trip.dayListMode = actEl.dataset.layout === "timeline" ? "timeline" : "category";
+      WorldApp.persist({ touchPlanner: true });
+      return render(state);
     }
     if (act === "activity-detail") {
       if (!trip) return;
@@ -1747,6 +1857,8 @@ window.WorldPlanner = (() => {
     bound = true;
     $("btn-planner")?.addEventListener("click", () => toggle(true));
     panel.addEventListener("click", panelPointer, true);
+    panel.addEventListener("touchstart", panelPointer, { passive: true, capture: true });
+    panel.addEventListener("touchmove", panelPointer, { passive: true, capture: true });
     panel.addEventListener("touchend", panelPointer, { passive: false, capture: true });
     panel.addEventListener("change", onChange);
     panel.addEventListener("focusout", onBlur);

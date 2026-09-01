@@ -878,14 +878,21 @@ input[type="date"]::-webkit-date-and-time-value {
 }
 .day-nav-chips {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0.3rem;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 0.15rem 0 0.65rem;
+  touch-action: pan-x;
+  scroll-snap-type: x proximity;
+  padding: 0.15rem 0.25rem 0.65rem;
   margin-bottom: 0.25rem;
+  max-width: 100%;
 }
 .day-nav-chip {
   flex: 0 0 auto;
+  scroll-snap-align: center;
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text);
@@ -899,6 +906,47 @@ input[type="date"]::-webkit-date-and-time-value {
   touch-action: manipulation;
   -webkit-tap-highlight-color: rgba(124, 240, 255, 0.2);
   user-select: none;
+}
+.day-layout-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+  padding: 0 0.15rem;
+}
+.day-layout-label { font-size: 0.78rem; }
+.day-layout-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.day-layout-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+  min-height: 36px;
+  cursor: pointer;
+}
+.day-layout-btn.active {
+  background: rgba(124, 240, 255, 0.12);
+  color: var(--accent);
+}
+.day-place-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(124, 240, 255, 0.25);
+  border-radius: 10px;
+  background: rgba(124, 240, 255, 0.06);
+  font-size: 0.82rem;
 }
 .day-nav-arrow { min-width: 44px; min-height: 44px; touch-action: manipulation; }
 .planner-trip-nav {
@@ -930,21 +978,48 @@ input[type="date"]::-webkit-date-and-time-value {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.65rem;
-  width: 100%;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
   min-height: 44px;
-  padding: 0.55rem 0.7rem;
+  padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   color: inherit;
   font: inherit;
   text-align: left;
+}
+.activity-row-detail {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--accent);
+  font-size: 0.95rem;
+  line-height: 1;
   cursor: pointer;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: rgba(124, 240, 255, 0.15);
+  padding: 0;
 }
-.activity-row:active { background: rgba(124, 240, 255, 0.08); }
+.activity-row-detail:active { background: rgba(124, 240, 255, 0.12); }
+.activity-row-cat { flex-shrink: 0; font-size: 0.9rem; opacity: 0.85; }
+.activity-list-timeline { gap: 0.4rem; }
+.activity-timeline-row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+}
+.activity-timeline-num {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: center;
+}
 .activity-row-text {
   flex: 1;
   min-width: 0;
