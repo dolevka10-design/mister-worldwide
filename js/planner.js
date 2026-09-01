@@ -29,6 +29,7 @@ window.WorldPlanner = (() => {
   let routeEditorOpen = false;
   let tripListOpen = true;
   let activityDetailCtx = null;
+  let pendingDeleteTrip = null;
 
   let lastActionAt = 0;
   let lastActionKey = "";
@@ -80,7 +81,7 @@ window.WorldPlanner = (() => {
       return;
     }
 
-    if (e.target.closest("input, textarea, select, option, a.place-link")) {
+    if (e.target.closest("input, textarea, select, option, a[href]")) {
       touchTrack = null;
       return;
     }
@@ -155,12 +156,11 @@ window.WorldPlanner = (() => {
 
   function plannerView(state) {
     const p = ensurePlanner(state);
-    const trip = getActiveTrip(state);
-    if (!p.trips.length && !trip) return "create";
-    if (p.view === "trip" && trip) return "trip";
+    if (p.view === "list") return (p.trips || []).length ? "list" : "create";
     if (p.view === "create") return "create";
-    if (p.activeTripId && trip) return "trip";
-    return "list";
+    const trip = getActiveTrip(state);
+    if (p.view === "trip" && trip) return "trip";
+    return (p.trips || []).length ? "list" : "create";
   }
 
   function parseDate(s) {
@@ -428,13 +428,11 @@ window.WorldPlanner = (() => {
     if (idx < 0) return false;
     planner.trips.splice(idx, 1);
     if (planner.activeTripId === tripId) {
-      planner.activeTripId = planner.trips[0]?.id || null;
+      planner.activeTripId = null;
       activeDayNum = 1;
       planner.activeDayNum = 1;
-      if (planner.activeTripId) setPlannerView(state, "trip", planner.activeTripId, 1);
-      else setPlannerView(state, planner.trips.length ? "list" : "create", null, 1);
-      showCreate = !planner.trips.length;
     }
+    planner.updatedAt = new Date().toISOString();
     return true;
   }
 
@@ -1054,11 +1052,12 @@ window.WorldPlanner = (() => {
   function renderTripNavBar(state, trip) {
     return `
       <div class="planner-trip-nav card">
-          <button type="button" class="btn btn-ghost btn-sm" data-act="trips-back" onclick="WorldPlanner.act(event)">← Trips</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="trips-back" onclick="WorldPlanner.act(event)">← Trips</button>
         <div class="planner-trip-nav-meta">
           <strong>${esc(trip.name)}</strong>
           <span class="muted">${esc(formatTripDates(trip))}</span>
         </div>
+        <button type="button" class="btn btn-ghost btn-sm trip-nav-del" data-act="delete-trip" data-trip-id="${esc(trip.id)}" onclick="WorldPlanner.act(event)">Delete</button>
       </div>`;
   }
 
@@ -1078,7 +1077,7 @@ window.WorldPlanner = (() => {
                 <strong>${esc(t.name)}</strong>
                 <span class="muted">${esc(formatTripDates(t))}</span>
               </button>
-              <button type="button" class="btn btn-ghost btn-sm trip-chip-del" data-act="delete-trip" data-trip-id="${esc(t.id)}" aria-label="Delete trip">✕</button>
+              <button type="button" class="btn btn-ghost btn-sm trip-chip-del" data-act="delete-trip" data-trip-id="${esc(t.id)}" onclick="WorldPlanner.act(event)" aria-label="Delete trip">✕</button>
             </div>`).join("")}
         </div>` : `<p class="muted planner-empty-hint">No trips yet — create one or import an Excel/PDF itinerary.</p>`}
       </section>`;
@@ -1099,13 +1098,22 @@ window.WorldPlanner = (() => {
       </section>`;
   }
 
-  function renderActivityRow(item, dayNum, { showCategory = false } = {}) {
-    const catLabel = item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category);
+  function renderActivityRow(state, trip, item, dayNum, { showCategory = false, reorder = false, index = 0, total = 1 } = {}) {
+    const seg = segmentForDay(trip, dayNum);
+    const country = state.countries.find((c) => c.id === seg?.countryId);
+    const href = mapsHref(item, item.importLocation || seg?.city, country?.name);
     return `<div class="activity-row">
       ${showCategory ? `<span class="activity-row-cat">${categoryIcon(item.category)}</span>` : ""}
       <span class="activity-row-text">${esc(item.name || "Activity")}</span>
       ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
-      <button type="button" class="activity-row-detail" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Activity details">ⓘ</button>
+      <span class="activity-row-actions">
+        ${reorder ? `
+          <button type="button" class="activity-row-move" data-act="item-up" data-item="${esc(item.id)}" data-day="${dayNum}" ${index === 0 ? "disabled" : ""} aria-label="Move up" onclick="WorldPlanner.act(event)">↑</button>
+          <button type="button" class="activity-row-move" data-act="item-down" data-item="${esc(item.id)}" data-day="${dayNum}" ${index >= total - 1 ? "disabled" : ""} aria-label="Move down" onclick="WorldPlanner.act(event)">↓</button>
+        ` : ""}
+        ${href ? `<a class="activity-row-maps" href="${esc(href)}" target="_blank" rel="noopener" aria-label="Open in Maps">Maps</a>` : ""}
+        <button type="button" class="activity-row-detail" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Activity details" onclick="WorldPlanner.act(event)">ⓘ</button>
+      </span>
     </div>`;
   }
 
@@ -1117,7 +1125,7 @@ window.WorldPlanner = (() => {
         ${items.map((item, i) => `
           <div class="activity-timeline-row">
             <span class="activity-timeline-num">${i + 1}</span>
-            ${renderActivityRow(item, dayNum, { showCategory: true })}
+            ${renderActivityRow(state, trip, item, dayNum, { showCategory: true, reorder: true, index: i, total: items.length })}
           </div>`).join("")}
       </div>`;
     }
@@ -1126,9 +1134,44 @@ window.WorldPlanner = (() => {
       <section class="day-category-section card">
         <h3 class="day-category-title">${categoryIcon(g.category)} ${esc(PlaceCategorize.plannerLabel(g.category))}</h3>
         <div class="activity-list activity-list-rows">
-          ${g.items.map((item) => renderActivityRow(item, dayNum)).join("")}
+          ${g.items.map((item) => renderActivityRow(state, trip, item, dayNum)).join("")}
         </div>
       </section>`).join("");
+  }
+
+  function hideDeleteTripModal() {
+    pendingDeleteTrip = null;
+    const modal = $("trip-delete-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function showDeleteTripModal(trip) {
+    if (!trip) return;
+    pendingDeleteTrip = { id: trip.id, name: trip.name };
+    const nameEl = $("tdm-name");
+    if (nameEl) nameEl.textContent = `Delete “${trip.name}”? This cannot be undone.`;
+    const modal = $("trip-delete-modal");
+    if (modal) modal.hidden = false;
+  }
+
+  function confirmDeleteTrip() {
+    if (!pendingDeleteTrip) return hideDeleteTripModal();
+    const state = WorldApp.getState();
+    const name = pendingDeleteTrip.name;
+    const id = pendingDeleteTrip.id;
+    hideDeleteTripModal();
+    if (!deleteTrip(state, id)) return;
+    const planner = ensurePlanner(state);
+    setPlannerView(state, planner.trips.length ? "list" : "create", null);
+    tripListOpen = true;
+    showCreate = !planner.trips.length;
+    rememberNav(state);
+    try {
+      WorldApp.persist({ touchPlanner: true, cloud: true, refreshUi: false });
+      WorldApp.persistPlanner({ flush: true, skipPlannerRender: true, cloud: true });
+    } catch { /* */ }
+    render(state);
+    WorldApp.toast(`Deleted "${name}"`);
   }
 
   function hideActivityDetail() {
@@ -1500,33 +1543,27 @@ window.WorldPlanner = (() => {
       return render(state);
     }
     if (act === "trips-back") {
+      e.preventDefault?.();
+      e.stopPropagation?.();
       setPlannerView(state, "list");
       tripListOpen = true;
+      showCreate = false;
       rememberNav(state);
       try { WorldApp.persistNav?.(); } catch { /* */ }
-      return render(state);
+      render(state);
+      return;
     }
     if (act === "open-trip") {
       const t = state.planner.trips.find((x) => x.id === actEl.dataset.tripId);
       return enterTripView(state, actEl.dataset.tripId, { dayNum: t?.activeDayNum || 1 });
     }
     if (act === "delete-trip") {
-      e.preventDefault();
-      e.stopPropagation();
+      e.preventDefault?.();
+      e.stopPropagation?.();
       const id = actEl.dataset.tripId;
       const t = state.planner.trips.find((x) => x.id === id);
       if (!t) return;
-      deleteTrip(state, id);
-      if (state.planner.activeTripId) {
-        setPlannerView(state, "trip", state.planner.activeTripId);
-      } else {
-        setPlannerView(state, "list", null);
-        tripListOpen = true;
-      }
-      WorldApp.persist({ touchPlanner: true, cloud: true, refreshUi: false });
-      WorldApp.persistPlanner({ flush: true, skipPlannerRender: true, cloud: true });
-      render(state);
-      return WorldApp.toast(`Deleted "${t.name}"`);
+      return showDeleteTripModal(t);
     }
     if (act === "day-go") {
       e.preventDefault();
@@ -1895,6 +1932,11 @@ window.WorldPlanner = (() => {
     $("tam-confirm")?.addEventListener("click", confirmAddToTrip);
     $("trip-add-modal")?.addEventListener("click", (e) => {
       if (e.target.id === "trip-add-modal") hideAddToTripModal();
+    });
+    $("tdm-cancel")?.addEventListener("click", hideDeleteTripModal);
+    $("tdm-confirm")?.addEventListener("click", confirmDeleteTrip);
+    $("trip-delete-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "trip-delete-modal") hideDeleteTripModal();
     });
     $("adm-close")?.addEventListener("click", hideActivityDetail);
     $("activity-detail-modal")?.addEventListener("click", (e) => {

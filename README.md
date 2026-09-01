@@ -2,7 +2,7 @@
 
 Interactive **3D travel globe** with Google Maps saved places, fine-grained categories, **Travel Planner**, and **Google Takeout / itinerary import**.
 
-**Live:** [Netlify](https://www.netlify.com/) — see [SETUP.md](SETUP.md)
+**Live:** deploy via [Netlify](https://www.netlify.com/) — see [SETUP.md](SETUP.md). Implementation notes for the planner, compact cloud sync, and day page: [docs/PLANNER.md](docs/PLANNER.md).
 
 ## Features
 
@@ -11,11 +11,15 @@ Interactive **3D travel globe** with Google Maps saved places, fine-grained cate
 - **Country strip** — touch scroll + arrows
 - **Fine-grained categories** — pizza, burgers, sushi, ramen, bagels, museums, landmarks, etc.
 - **Place browser** — filter by city & category, sort, group views
-- **Travel Planner** — one scrollable itinerary document: locations → days → places with time, notes, category, and Maps links (Excel/PDF columns)
-- **Import itinerary** — Excel (xlsx), PDF, or CSV in the planner (Party-in-the-USA style)
+- **Travel Planner**
+  - Trip list (open / delete with confirm) and inner day page (← Trips, delete trip)
+  - Each day: **Categories** or **Timeline** (PDF order; ↑ ↓ to reorder)
+  - Activity rows show **Place/Activity** plus **Maps** next to **ⓘ** (popup: date, city, notes, link)
+  - **Map this day on globe** — globe pins + country panel of that day’s places
+- **Import itinerary** — Excel / PDF / CSV; PDF uses itinerary city pages only (e.g. New York, Niagara Falls, Washington)
 - **Import places** — Google Takeout ZIP, My Maps CSV, or Maps URLs (`Name | City | Country | URL`)
-- **AI assistant** — persistent full-screen chat (Gemini / Groq / OpenRouter) with tool-calling
-- **Cloud sync** — Firestore per-user data + planner + assistant chat
+- **AI assistant** — persistent chat (Gemini / Groq / OpenRouter)
+- **Cloud sync** — compact Firestore payload (trips + places you added). Seed places stay in `data/places.json` and are **not** uploaded (avoids quota errors)
 
 ## Import places
 
@@ -48,17 +52,17 @@ node scripts/import-takeout.js path/to/takeout.zip
 
 ## Travel Planner
 
-Opens as a **single page**: trip list at the top, selected trip document below.
-
-1. **Planner** — all trips as tappable chips, **+ New trip**, **Import Excel/PDF**
-2. **Create trip** — countries + date ranges; after save the itinerary document opens on the same page
-3. **Trip document** (Excel columns):
-   - Date · Day · Location · Time/Order · Place/Activity · Notes · Category · Google Maps
-   - Grouped by location (New York, Niagara Falls, …) then day
-   - Add / remove / reorder locations and places live
-   - Getting-around guides (transit writeups) when imported
+1. **Planner** — trip chips, **+ New trip**, **Import Excel/PDF**. ✕ deletes a trip after a confirm popup.
+2. **Create trip** — countries + date ranges; itinerary opens on the same page.
+3. **Inside a trip**
+   - **← Trips** returns to the list (does not close Planner)
+   - **Delete** in the trip header (same confirm popup)
+   - Day chips scroll horizontally; dropdown + arrows change day
+   - **Timeline**: numbered PDF order; **↑ ↓** reorder activities; **Maps** + **ⓘ** on each row
+   - **Categories**: grouped by type; same Maps + ⓘ actions
+   - **Map this day on globe** closes Planner and shows that day’s places
 4. **+ Trip** on any saved place in a country page
-5. **Export Excel** — CSV with the same columns
+5. **Save trip** / **Export Excel** at the bottom of the trip document
 
 ### Import a trip planner (xlsx / pdf / csv)
 
@@ -68,16 +72,20 @@ In Planner, tap **Import Excel/PDF**. Expected columns:
 |------|-----|----------|------------|----------------|-------|----------|------------------|
 | 17.09.26 | Day 1 | New York | 05:15 | Landing in LGA | Flight LY027 | Transportation / Flight | https://maps.google.com/… |
 
-New places and cities that are not in the saved bank are added and categorized from the trip row (Food & Dining, Sightseeing, Coffee & Snacks, Accommodation, Nightlife, Transportation, Guide / Info, Shopping).
+PDF import reads **itinerary section pages** only (city headers like New York / Niagara Falls / Washington), not cover or “total days” overview pages. After parser changes, delete the old trip and re-import.
+
+New places from the file are added to the country/city bank with a category (Food & Dining, Sightseeing, Coffee & Snacks, etc.).
 
 ## Data
 
 ```bash
 node scripts/build-data.js path/to/by-country-mymaps
 node scripts/import-takeout.js path/to/takeout.zip
+node scripts/test-import-planner.js
+node scripts/test-store-compact.js
 ```
 
-Places live in `data/places.json`. Categories are refined at runtime via `js/categorize.js`.
+Places live in `data/places.json`. Categories are refined at runtime via `js/categorize.js`. User trips and extra places sync compactly; see [docs/PLANNER.md](docs/PLANNER.md).
 
 ## Quick start
 

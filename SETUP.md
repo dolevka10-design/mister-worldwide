@@ -38,7 +38,9 @@ Each signed-in user adds their own free API key in the assistant:
 
 Keys sync via Firestore `assistantChats/{uid}`.
 
-Travel planner trips sync in real time via Firestore `worldData/{uid}.planner` and `plannerUpdatedAt` (merged across PC, phone, and other devices alongside places and countries).
+Travel planner trips sync via compact Firestore docs at `worldData/{uid}` (`v: 2`: `planner`, `userPlaces`, not the 2.5MB seed dump). See [docs/PLANNER.md](docs/PLANNER.md). Changing day or Timeline does not hit the cloud; **Save trip** and import do.
+
+If you still see **quota exceeded** after this compact format, wait for the Spark daily reset or upgrade the Firebase project to Blaze. Local trips keep working.
 
 ### Import Google Maps / Takeout
 
@@ -69,5 +71,8 @@ No native build required.
 - **Empty country bar / 0 stats on load** — hard refresh; ensure you are on the latest deploy.
 - **Globe blank** — check browser console; ensure `globe.gl` CDN is reachable.
 - **Planner AI** — requires a Groq/OpenRouter key in the assistant; use **Quick suggest** for zero-token local picks.
+- **“Quota exceeded” on import / open trip / Timeline / days** — the app used to upload all ~6k seed places (over Firestore’s 1MB limit). Current builds save only trips + new places. Hard-refresh; first successful save replaces the old oversized document. See [docs/PLANNER.md](docs/PLANNER.md).
+- **← Trips does nothing** — hard-refresh this deploy. That button returns to the trip list; it must not reopen the trip just because one is still “active”.
+- **Trip chip / Save / layout buttons dead until close** — same quota throw; current persist never blocks the UI. Hard-refresh after deploy.
 - **Maps URL “quota” / not found** — paste `Name | City | Country | URL`, or a full `maps.google.com` link with `@lat,lng`. Country-page Add URL still saves the place on that country if the short link cannot be expanded.
 - **Trip chip does nothing** — hard refresh after deploy; trips are tappable chips on the planner home list and open the itinerary on the same page.

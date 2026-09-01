@@ -956,8 +956,9 @@ input[type="date"]::-webkit-date-and-time-value {
   padding: 0.65rem 0.75rem;
   margin-bottom: 0.65rem;
 }
-.planner-trip-nav-meta { min-width: 0; }
+.planner-trip-nav-meta { min-width: 0; flex: 1; }
 .planner-trip-nav-meta strong { display: block; }
+.trip-nav-del { flex-shrink: 0; color: #ffb4b4; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1007,6 +1008,41 @@ input[type="date"]::-webkit-date-and-time-value {
   padding: 0;
 }
 .activity-row-detail:active { background: rgba(124, 240, 255, 0.12); }
+.activity-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.activity-row-move {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  touch-action: manipulation;
+}
+.activity-row-move:disabled { opacity: 0.35; }
+.activity-row-maps {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
 .activity-row-cat { flex-shrink: 0; font-size: 0.9rem; opacity: 0.85; }
 .activity-list-timeline { gap: 0.4rem; }
 .activity-timeline-row {
