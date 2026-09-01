@@ -145,14 +145,15 @@ window.WorldCloud = (() => {
   }
 
   function flushSave(uid, state) {
-    if (!db || !uid) return Promise.resolve();
+    if (!db || !uid) return Promise.resolve({ ok: false, skipped: true });
     clearTimeout(saveTimer);
     return db.doc(docPath(uid)).set(
       { ...state, savedAt: firebase.firestore.FieldValue.serverTimestamp() },
       { merge: true }
-    ).catch((e) => {
+    ).then(() => ({ ok: true })).catch((e) => {
       console.warn("Cloud save failed", e);
       if (isQuotaError(e)) WorldApp?.toast?.("Cloud sync paused (quota). Changes still save on this device.", "warn");
+      return { ok: false, error: e };
     });
   }
 

@@ -40,8 +40,9 @@ window.WorldApp = (() => {
     persist({ touchPlanner: true });
     if (!skipPlannerRender && WorldPlanner?.isOpen?.()) WorldPlanner?.render?.(state);
     if (flush && user?.uid && WorldCloud.configured) {
-      WorldCloud.flushSave(user.uid, WorldStore.packCloudPayload(state));
+      return WorldCloud.flushSave(user.uid, WorldStore.packCloudPayload(state));
     }
+    return Promise.resolve({ ok: true });
   }
 
   function getState() { return state; }

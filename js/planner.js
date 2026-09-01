@@ -27,6 +27,7 @@ window.WorldPlanner = (() => {
   let lastScroll = 0;
   let activeDayNum = 1;
   let routeEditorOpen = false;
+  let tripListOpen = true;
 
   function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
@@ -744,6 +745,41 @@ window.WorldPlanner = (() => {
     URL.revokeObjectURL(a.href);
   }
 
+  function scrollPlannerToDay() {
+    requestAnimationFrame(() => {
+      const b = document.querySelector(".planner-body");
+      const el = document.getElementById("planner-day-page");
+      if (b) b.scrollTop = 0;
+      if (b && el) {
+        const top = el.getBoundingClientRect().top - b.getBoundingClientRect().top + b.scrollTop - 8;
+        b.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+      }
+    });
+  }
+
+  function goToDay(dayNum, { persist = false } = {}) {
+    const state = WorldApp.getState();
+    const trip = getActiveTrip(state);
+    if (!trip) return;
+    activeDayNum = clampDayNum(trip, dayNum);
+    trip.activeDayNum = activeDayNum;
+    lastScroll = 0;
+    if (persist) WorldApp.persistPlanner({ skipPlannerRender: true });
+    render(state);
+    scrollPlannerToDay();
+  }
+
+  function renderTripNavBar(state, trip) {
+    return `
+      <div class="planner-trip-nav card">
+        <button type="button" class="btn btn-ghost btn-sm" data-act="trips-back">← Trips</button>
+        <div class="planner-trip-nav-meta">
+          <strong>${esc(trip.name)}</strong>
+          <span class="muted">${esc(formatTripDates(trip))}</span>
+        </div>
+      </div>`;
+  }
+
   function renderTripRail(state) {
     const trips = ensurePlanner(state).trips || [];
     const activeId = state.planner.activeTripId;
@@ -839,15 +875,31 @@ window.WorldPlanner = (() => {
           <h2 class="day-page-title">${esc(headline)}</h2>
         </header>
         <nav class="day-nav-bar" aria-label="Day navigation">
-          <button type="button" class="btn btn-ghost btn-sm" data-act="day-prev" ${dayNum <= 1 ? "disabled" : ""}>←</button>
-          <div class="day-nav-chips" role="tablist">
-            ${(trip.days || []).map((d) => `
-              <button type="button" role="tab" class="day-nav-chip ${d.day === dayNum ? "active" : ""}" data-act="day-go" data-day="${d.day}" aria-selected="${d.day === dayNum}">
-                ${d.date ? esc(fmtDate(d.date)) : `D${d.day}`}
-              </button>`).join("")}
-          </div>
-          <button type="button" class="btn btn-ghost btn-sm" data-act="day-next" ${dayNum >= total ? "disabled" : ""}>→</button>
+          <button type="button" class="btn btn-ghost btn-sm day-nav-arrow" data-act="day-prev" ${dayNum <= 1 ? "disabled" : ""}>←</button>
+          <label class="day-jump-field">
+            <span class="sr-only">Jump to day</span>
+            <select class="pill-select day-jump-select" id="day-jump-select" data-act="day-select">
+              ${(trip.days || []).map((d) => {
+                const seg = segmentForDay(trip, d.day);
+                const country = state.countries.find((c) => c.id === seg?.countryId);
+                const label = [
+                  `Day ${d.day}`,
+                  d.date ? fmtDate(d.date) : "",
+                  seg?.city && seg.city !== "Other" ? seg.city : "",
+                  country?.name || "",
+                ].filter(Boolean).join(" · ");
+                return `<option value="${d.day}" ${d.day === dayNum ? "selected" : ""}>${esc(label)}</option>`;
+              }).join("")}
+            </select>
+          </label>
+          <button type="button" class="btn btn-ghost btn-sm day-nav-arrow" data-act="day-next" ${dayNum >= total ? "disabled" : ""}>→</button>
         </nav>
+        <div class="day-nav-chips" role="tablist" aria-label="Day chips">
+          ${(trip.days || []).map((d) => `
+            <button type="button" role="tab" class="day-nav-chip ${d.day === dayNum ? "active" : ""}" data-act="day-go" data-day="${d.day}" aria-selected="${d.day === dayNum}">
+              ${d.date ? esc(fmtDate(d.date)) : `D${d.day}`}
+            </button>`).join("")}
+        </div>
         <div class="day-sections">
           ${groups.length ? groups.map((g) => `
             <section class="day-category-section card">
@@ -900,7 +952,8 @@ window.WorldPlanner = (() => {
   function renderTripDoc(state, trip) {
     const countries = WorldStore.countriesForUi(state);
     const countryOpts = countries.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
-    activeDayNum = clampDayNum(trip, activeDayNum);
+    activeDayNum = clampDayNum(trip, trip.activeDayNum || activeDayNum);
+    trip.activeDayNum = activeDayNum;
     return `
       <article class="planner-trip-doc" id="planner-trip-doc">
         <header class="trip-doc-head card">
@@ -945,6 +998,8 @@ window.WorldPlanner = (() => {
     const body = panel.querySelector(".planner-body");
     if (body) lastScroll = body.scrollTop;
     const trip = getActiveTrip(state);
+    const trips = ensurePlanner(state).trips || [];
+    const showRail = tripListOpen || !trip;
 
     panel.innerHTML = `
       <header class="planner-head">
@@ -957,9 +1012,9 @@ window.WorldPlanner = (() => {
         <button type="button" class="btn btn-ghost btn-sm" data-act="close" aria-label="Close">✕</button>
       </header>
       <div class="planner-body">
-        ${renderTripRail(state)}
-        ${showCreate ? renderCreateForm(state) : ""}
-        ${trip ? renderTripDoc(state, trip) : (!showCreate && !ensurePlanner(state).trips.length ? renderCreateForm(state) : "")}
+        ${showRail ? renderTripRail(state) : (trip ? renderTripNavBar(state, trip) : "")}
+        ${showCreate && showRail ? renderCreateForm(state) : ""}
+        ${trip && !showCreate ? renderTripDoc(state, trip) : (!trip && !showCreate && !trips.length ? renderCreateForm(state) : "")}
       </div>`;
 
     requestAnimationFrame(() => {
@@ -987,12 +1042,21 @@ window.WorldPlanner = (() => {
     if (msg) WorldApp.toast(msg);
   }
 
-  function openTrip(state, tripId, { toast: msg, dayNum } = {}) {
+  function openTrip(state, tripId, { toast: msg, dayNum, flush = false } = {}) {
     setActiveTrip(state, tripId);
     showCreate = false;
+    tripListOpen = false;
     activeDayNum = dayNum || 1;
+    const trip = getActiveTrip(state);
+    if (trip) {
+      activeDayNum = clampDayNum(trip, activeDayNum);
+      trip.activeDayNum = activeDayNum;
+    }
     lastScroll = 0;
-    persistLive({ toast: msg, scroll: "#planner-day-page" });
+    WorldApp.persistPlanner({ flush, skipPlannerRender: true });
+    render(state);
+    scrollPlannerToDay();
+    if (msg) WorldApp.toast(msg);
   }
 
   function onClick(e) {
@@ -1018,12 +1082,14 @@ window.WorldPlanner = (() => {
       setActiveTrip(state, null);
       return render(state);
     }
+    if (act === "trips-back") {
+      tripListOpen = true;
+      return render(state);
+    }
     if (act === "open-trip") {
       e.preventDefault();
       e.stopPropagation();
-      activeDayNum = 1;
-      lastScroll = 0;
-      return openTrip(state, actEl.dataset.tripId);
+      return openTrip(state, actEl.dataset.tripId, { dayNum: 1 });
     }
     if (act === "delete-trip") {
       e.preventDefault();
@@ -1033,24 +1099,23 @@ window.WorldPlanner = (() => {
       if (!t) return;
       if (!confirm(`Delete "${t.name}"? This cannot be undone.`)) return;
       deleteTrip(state, id);
-      return persistLive({ toast: "Trip deleted", scroll: state.planner.activeTripId ? "#planner-day-page" : undefined });
+      if (!state.planner.activeTripId) tripListOpen = true;
+      return persistLive({ flush: true, toast: "Trip deleted", scroll: state.planner.activeTripId ? "#planner-day-page" : undefined });
     }
     if (act === "day-go") {
-      activeDayNum = Number(actEl.dataset.day);
-      lastScroll = 0;
-      return persistLive({ scroll: "#planner-day-page" });
+      e.preventDefault();
+      e.stopPropagation();
+      return goToDay(Number(actEl.dataset.day));
     }
     if (act === "day-prev") {
+      e.preventDefault();
       if (!trip) return;
-      activeDayNum = clampDayNum(trip, activeDayNum - 1);
-      lastScroll = 0;
-      return persistLive({ scroll: "#planner-day-page" });
+      return goToDay(activeDayNum - 1);
     }
     if (act === "day-next") {
+      e.preventDefault();
       if (!trip) return;
-      activeDayNum = clampDayNum(trip, activeDayNum + 1);
-      lastScroll = 0;
-      return persistLive({ scroll: "#planner-day-page" });
+      return goToDay(activeDayNum + 1);
     }
     if (act === "add-create-row") {
       const rows = $("new-trip-rows");
@@ -1074,11 +1139,10 @@ window.WorldPlanner = (() => {
       const segments = collectCreateRows();
       const name = $("new-trip-name")?.value?.trim() || "My trip";
       if (!segments.length) return WorldApp.toast("Pick at least one country", "warn");
-      activeDayNum = 1;
-      showCreate = false;
-      open = true;
       const created = createTrip(state, { name, segments });
-      return openTrip(state, created.id, { toast: "Trip opened" });
+      created.activeDayNum = 1;
+      open = true;
+      return openTrip(state, created.id, { toast: "Trip created & synced", dayNum: 1, flush: true });
     }
     if (act === "save") {
       persistLive({ flush: true, toast: "Trip saved" });
@@ -1207,6 +1271,10 @@ window.WorldPlanner = (() => {
     }
     if (el.id === "planner-import-file") return;
 
+    if (el.id === "day-jump-select") {
+      return goToDay(Number(el.value), { persist: true });
+    }
+
     const act = el.dataset.act;
     if (act === "seg-field") {
       const field = el.dataset.field;
@@ -1246,9 +1314,10 @@ window.WorldPlanner = (() => {
       const draft = WorldPlannerImport.buildTripDraft(parsed);
       const state = WorldApp.getState();
       const trip = await importDraft(state, draft);
-      showCreate = false;
+      tripListOpen = false;
       activeDayNum = 1;
-      persistLive({ toast: `Imported ${draft.rowCount} rows · saved on this device`, scroll: "#planner-day-page" });
+      trip.activeDayNum = 1;
+      openTrip(state, trip.id, { toast: `Imported ${draft.rowCount} rows & synced`, dayNum: 1, flush: true });
       return trip;
     } catch (err) {
       WorldApp.toast(err.message || "Import failed", "error");
@@ -1332,9 +1401,14 @@ window.WorldPlanner = (() => {
     if (open) {
       const st = WorldApp.getState();
       const planner = ensurePlanner(st);
-      showCreate = !getActiveTrip(st) && !planner.trips.length;
       const trip = getActiveTrip(st);
-      if (trip) activeDayNum = clampDayNum(trip, activeDayNum);
+      showCreate = !trip && !planner.trips.length;
+      if (trip) {
+        tripListOpen = false;
+        activeDayNum = clampDayNum(trip, trip.activeDayNum || activeDayNum);
+      } else {
+        tripListOpen = true;
+      }
       render(st);
     }
   }
@@ -1344,7 +1418,15 @@ window.WorldPlanner = (() => {
     bound = true;
     const panel = $("planner-panel");
     $("btn-planner")?.addEventListener("click", () => toggle(true));
-    panel?.addEventListener("click", onClick);
+    panel?.addEventListener("click", onClick, true);
+    panel?.addEventListener("touchend", (e) => {
+      const chip = e.target.closest(".day-nav-chip, .day-nav-arrow");
+      if (!chip || chip.disabled) return;
+      if (chip.dataset.act) {
+        e.preventDefault();
+        onClick({ ...e, target: chip, preventDefault: () => {}, stopPropagation: () => {} });
+      }
+    }, { passive: false });
     panel?.addEventListener("change", onChange);
     panel?.addEventListener("focusout", onBlur);
     panel?.addEventListener("toggle", (e) => {
