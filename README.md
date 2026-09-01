@@ -62,7 +62,7 @@ node scripts/import-takeout.js path/to/takeout.zip
    - **Categories**: grouped by type; same grip + Maps + ⓘ + delete
    - **Map this day on globe** closes Planner and shows that day’s places
 4. **+ Trip** on any saved place in a country page
-5. **Save trip** / **Export Excel** at the bottom of the trip document
+5. **Save trip** / **Export CSV / PDF / Excel** at the bottom of the trip document
 
 ### Import a trip planner (xlsx / pdf / csv / zip)
 
@@ -73,6 +73,8 @@ In Planner, tap **Import Excel/PDF/ZIP**. Expected columns:
 | 17.09.26 | Day 1 | New York | 05:15 | Landing in LGA | Flight LY027 | Transportation / Flight | https://maps.google.com/… |
 
 PDF import lists **every page** in a checkbox popup. Itinerary city pages are pre-checked; cover and getting-around pages are not. Import only what you mark. Same-day rows across selected pages still merge. After that, a second popup lists locations and **every new place** on the globe.
+
+**Export** writes the same structure the importer reads: a ZIP with CSV, Excel, and PDF. Cover page (`Trip Planner Total Days N`), one itinerary page/sheet per city (`New York Itinerary` + the 8 columns), continuation pages if a city is long, and **Getting Around** pages for guides. Re-import the PDF (or the ZIP) and pick the same city pages.
 
 New places from the file are added to the correct country (e.g. Turkey) with category and Maps link.
 

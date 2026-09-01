@@ -7,7 +7,7 @@ const ctx = { window: {}, console };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(`${root}/js/categorize.js`, "utf8"), ctx);
 vm.runInContext(fs.readFileSync(`${root}/js/import-planner.js`, "utf8"), ctx);
-const { parseDelimited, parseItineraryPages, buildTripDraft, locationCountryHint, cityFromItineraryLine, describePdfPages, parsedFromPages } = ctx.window.WorldPlannerImport;
+const { parseDelimited, parseItineraryPages, buildTripDraft, locationCountryHint, cityFromItineraryLine, describePdfPages, parsedFromPages, buildExportPack, exportCsv, exportPdf, exportPdfPages, exportXlsxSheets, zipItineraryPaths } = ctx.window.WorldPlannerImport;
 
 let pageSeq = 0;
 function lineFromTab(tab) {
@@ -174,5 +174,64 @@ assert(!onlyItin.rows.some((r) => /AirTrain|Penn Station|Getting Around/i.test(`
 let threw = false;
 try { parsedFromPages(pack, []); } catch { threw = true; }
 assert(threw, "empty selection throws");
+
+const exportRows = [
+  { date: "2026-09-17", day: 1, location: "New York", time: "05:15", place: "Times Square", notes: "", category: "Sightseeing / Attraction", url: "https://maps.google.com/?q=Times+Square" },
+  { date: "17.09.26", day: "Day 1", location: "New York", time: "", place: "Joe's Pizza", notes: "slice", category: "Food & Dining", url: "" },
+  { date: "22.09.26", day: 6, location: "Washington", time: "09:00", place: "National Mall", notes: "", category: "Sightseeing / Attraction", url: "" },
+  { date: "22.09.26", day: 6, location: "Washington", time: "", place: "", notes: "", category: "", url: "", placeholder: true },
+];
+const exportPack = buildExportPack({
+  title: "Party USA",
+  dayCount: 14,
+  rows: exportRows,
+  guides: [{ title: "Transit", body: "Ride the E train from Penn Station then AirTrain to JFK.", city: "Washington" }],
+  maxRowsPerPage: 1,
+});
+assert(exportPack.pages[0].kind === "overview", "export cover page");
+assert(/Trip Planner Total Days 14/.test(exportPack.pages[0].title), `cover title: ${exportPack.pages[0].title}`);
+const nyPages = exportPack.pages.filter((p) => p.city === "New York");
+assert(nyPages.length === 2, `NY split into continuation pages: ${nyPages.length}`);
+assert(nyPages[0].kind === "itinerary", "first NY page is itinerary");
+assert(nyPages[1].kind === "continuation", "second NY page is continuation");
+assert(exportPack.pages.some((p) => p.kind === "guide" && /getting around/i.test(p.title)), "getting-around page");
+
+const csvOut = exportCsv(exportPack);
+const csvBack = parseDelimited(csvOut);
+assert(/Party USA/i.test(csvBack.title), `csv title: ${csvBack.title}`);
+assert(csvBack.rows.some((r) => /Times Square/i.test(r.place) && r.location === "New York"), "csv round-trip Times Square");
+assert(csvBack.rows.some((r) => /National Mall/i.test(r.place) && r.location === "Washington"), "csv round-trip National Mall");
+assert(csvBack.rows.some((r) => r.location === "Washington" && (r.placeholder || !r.place)), "csv keeps empty placeholder");
+assert(csvBack.guides.some((g) => /AirTrain/i.test(g.body || "")), "csv getting-around as guide not a day");
+
+const pdfPages = exportPdfPages(exportPack);
+const pdfDesc = describePdfPages(pdfPages, "Party USA");
+const pdfCover = pdfDesc.pages.find((p) => p.kind === "overview" || /cover|planner/i.test(p.title));
+const pdfNy = pdfDesc.pages.find((p) => /new york/i.test(p.title));
+const pdfGuide = pdfDesc.pages.find((p) => p.kind === "guide" || /getting around/i.test(p.title));
+assert(pdfCover && !pdfCover.suggested, "exported cover not suggested");
+assert(pdfNy?.suggested, "exported NY itinerary suggested");
+assert(pdfGuide && !pdfGuide.suggested, "exported getting-around not suggested");
+const pdfPicked = parsedFromPages(pdfDesc, pdfDesc.pages.filter((p) => p.suggested).map((p) => p.id));
+assert(pdfPicked.rows.some((r) => /Times Square/i.test(r.place)), "pdf pages round-trip Times Square");
+assert(pdfPicked.rows.some((r) => /National Mall/i.test(r.place)), "pdf pages round-trip National Mall");
+assert(!pdfPicked.rows.some((r) => /AirTrain/i.test(`${r.place} ${r.location}`)), "pdf suggested pages skip guide blob");
+const pdfDraft = buildTripDraft(pdfPicked);
+assert(pdfDraft.segments.some((s) => s.city === "New York"), "pdf draft NY segment");
+assert(pdfDraft.segments.some((s) => s.city === "Washington"), "pdf draft Washington segment");
+
+const sheets = exportXlsxSheets(exportPack);
+assert(sheets.some((s) => /overview/i.test(s.name)), "xlsx overview sheet");
+assert(sheets.some((s) => /new york/i.test(s.name) && s.kind === "itinerary"), "xlsx NY itinerary sheet");
+assert(sheets.some((s) => /getting around/i.test(s.name) && s.kind === "guide"), "xlsx getting-around sheet");
+assert(sheets.find((s) => /new york/i.test(s.name)).aoa.some((row) => row.includes("Times Square")), "xlsx NY rows");
+
+const pdfBytes = exportPdf(exportPack);
+const pdfHead = String.fromCharCode(...pdfBytes.slice(0, 8));
+assert(pdfHead.startsWith("%PDF-"), `pdf magic: ${pdfHead}`);
+assert(Array.from(pdfBytes).map((b) => String.fromCharCode(b)).join("").includes("New York Itinerary"), "pdf contains city itinerary");
+
+assert(zipItineraryPaths(["trip.csv", "trip.xlsx", "trip.pdf"]).join() === "trip.pdf", "export zip prefers pdf pages");
+assert(zipItineraryPaths(["a.csv", "b.csv"]).length === 2, "plain csv zip keeps both");
 
 process.exit(failed ? 1 : 0);

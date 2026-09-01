@@ -301,7 +301,7 @@ window.WorldPlannerImport = (() => {
   }
 
   function parseDelimited(text) {
-    const lines = String(text || "").split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim());
+    const lines = String(text || "").replace(/^\uFEFF/, "").split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim());
     if (!lines.length) return { rows: [], guides: [], title: "" };
     const headerLine = lines.find((l) => looksLikeHeader(l.split("\t")) || looksLikeHeader(l.split(",")) || looksLikeHeader(l.split(";")));
     const delim = headerLine?.includes("\t") ? "\t" : (headerLine?.includes(";") && (headerLine.split(";").length > headerLine.split(",").length) ? ";" : (headerLine?.includes(",") ? "," : "\t"));
@@ -332,13 +332,27 @@ window.WorldPlannerImport = (() => {
 
     for (const line of lines) {
       if (/itinerary/i.test(line) && !line.includes(delim === "\t" ? "\t" : ",")) {
+        if (guideBuf) { guides.push(guideBuf); guideBuf = null; }
         const loc = line.replace(/itinerary/i, "").trim();
         if (loc) { fallbackLocation = loc; ctx.location = loc; }
         if (!title) title = line.trim();
         continue;
       }
+      if (/trip planner/i.test(line) && !title) {
+        title = line.replace(/total days.*/i, "").trim() || title;
+      }
       if (/^usa trip planner/i.test(line) && !title) title = "USA Trip";
       const cells = split(line);
+      if (/getting\s*around|how\s*to\s*get\s*(to|around)/i.test(line) && cells.length <= 2 && !looksLikeHeader(cells)) {
+        if (guideBuf) guides.push(guideBuf);
+        const city = line.replace(/getting\s*around/ig, "").replace(/how\s*to\s*get\s*(to|around)/ig, "").trim();
+        guideBuf = { title: line.trim(), body: "", city: city || fallbackLocation };
+        continue;
+      }
+      if (guideBuf && cells.length <= 2 && !looksLikeHeader(cells) && !parsePlannerDate(cells[0])) {
+        guideBuf.body += (guideBuf.body ? "\n" : "") + line;
+        continue;
+      }
       if (!keys && looksLikeHeader(cells)) {
         keys = cells.map(headerKey);
         continue;
@@ -614,8 +628,13 @@ window.WorldPlannerImport = (() => {
     return dateRows >= 1;
   }
 
+  function isGuidePage(page) {
+    const text = (page.lines || []).map((l) => l.line).join(" ");
+    return /getting\s*around|how\s*to\s*get\s*(to|around)/i.test(text) && !/itinerary/i.test(text);
+  }
+
   function isSkipPage(page) {
-    return isOverviewPage(page);
+    return isOverviewPage(page) || isGuidePage(page);
   }
 
   function parseLinesChunk(lines, fallbackLocation, titleOut, inheritedColumns = null, inheritedCtx = null) {
@@ -693,10 +712,10 @@ window.WorldPlannerImport = (() => {
   function classifyImportPage(page, chunk) {
     const text = (page.lines || []).map((l) => l.line).join(" ");
     const places = (chunk.rows || []).filter((r) => r.place && !r.placeholder);
-    if (/getting\s*around|how\s*to\s*get\s*(to|around)|table\s*of\s*contents|cover\s*page/i.test(text) && !/itinerary/i.test(text)) {
+    if (isOverviewPage(page)) return "overview";
+    if (isGuidePage(page) || ((chunk.guides || []).length && !places.length && /getting\s*around|how\s*to\s*get\s*(to|around)|table\s*of\s*contents/i.test(text))) {
       return "guide";
     }
-    if (isOverviewPage(page)) return "overview";
     if (/itinerary/i.test(text) || (page.lines || []).some((l) => looksLikeHeader((l.cells || []).map((c) => c.str)))) {
       return "itinerary";
     }
@@ -725,10 +744,22 @@ window.WorldPlannerImport = (() => {
       const pageNum = page.pageNum || i + 1;
       const header = (page.lines || []).find((l) => /itinerary/i.test(l.line) && (l.cells || []).length <= 5);
       if (header) lastLocation = cityFromItineraryLine(header.line) || lastLocation;
-      const chunk = parseLinesChunk(page.lines || [], lastLocation, titleOut, sharedColumns, sharedCtx);
-      if (chunk.columns) sharedColumns = chunk.columns;
-      if (chunk.location) lastLocation = chunk.location;
-      if (chunk.ctx) sharedCtx = { date: chunk.ctx.date || null, day: chunk.ctx.day || null, location: lastLocation };
+      let chunk;
+      if (isGuidePage(page)) {
+        const body = (page.lines || []).map((l) => l.line).join("\n");
+        chunk = {
+          rows: [],
+          guides: [{ title: (page.lines || [])[0]?.line || "Getting around", body, city: lastLocation }],
+          columns: sharedColumns,
+          location: lastLocation,
+          ctx: sharedCtx,
+        };
+      } else {
+        chunk = parseLinesChunk(page.lines || [], lastLocation, titleOut, sharedColumns, sharedCtx);
+        if (chunk.columns) sharedColumns = chunk.columns;
+        if (chunk.location) lastLocation = chunk.location;
+        if (chunk.ctx) sharedCtx = { date: chunk.ctx.date || null, day: chunk.ctx.day || null, location: lastLocation };
+      }
       const kind = classifyImportPage(page, chunk);
       const places = (chunk.rows || []).filter((r) => r.place && !r.placeholder);
       const dates = [...new Set((chunk.rows || []).map((r) => r.date).filter(Boolean))].sort();
@@ -1039,11 +1070,19 @@ window.WorldPlannerImport = (() => {
     return { rows, guides, title };
   }
 
+  function zipItineraryPaths(names) {
+    const files = (names || []).filter((n) => /\.(csv|tsv|txt|xlsx|xls|pdf)$/i.test(n) && !/(^|\/)(__macosx|\.)/i.test(n));
+    const pdfs = files.filter((n) => n.toLowerCase().endsWith(".pdf"));
+    const tables = files.filter((n) => /\.(csv|tsv|txt|xlsx|xls)$/i.test(n));
+    if (pdfs.length && tables.length && pdfs.length + tables.length === files.length) return pdfs;
+    return files;
+  }
+
   async function parseZip(file) {
     if (typeof JSZip === "undefined") throw new Error("ZIP library not loaded");
     const zip = await JSZip.loadAsync(file);
     const merged = { rows: [], guides: [], title: String(file?.name || "Imported trip").replace(/\.zip$/i, "") };
-    const names = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+    const names = zipItineraryPaths(Object.keys(zip.files).filter((n) => !zip.files[n].dir));
     for (const path of names) {
       const lower = path.toLowerCase();
       const entry = zip.files[path];
@@ -1104,7 +1143,7 @@ window.WorldPlannerImport = (() => {
       const zip = await JSZip.loadAsync(file);
       const pages = [];
       let title = String(file?.name || "Imported trip").replace(/\.zip$/i, "");
-      const names = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+      const names = zipItineraryPaths(Object.keys(zip.files).filter((n) => !zip.files[n].dir));
       for (const path of names) {
         const lower = path.toLowerCase();
         const entry = zip.files[path];
@@ -1285,9 +1324,318 @@ window.WorldPlannerImport = (() => {
     };
   }
 
+  const EXPORT_HEADER = ["Date", "Day", "Location", "Time/Order", "Place/Activity", "Notes", "Category", "Google Maps Link"];
+  const PDF_COL_X = [28, 88, 148, 228, 292, 468, 568, 668];
+  const PDF_ROWS_PER_PAGE = 16;
+  const PDF_PAGE_W = 792;
+  const PDF_PAGE_H = 612;
+
+  function fmtExportDate(isoOrPlanner) {
+    const n = norm(isoOrPlanner);
+    if (!n) return "";
+    const parsed = parsePlannerDate(n);
+    if (parsed) {
+      const [y, m, d] = parsed.split("-");
+      return `${d}.${m}.${String(y).slice(2)}`;
+    }
+    return n;
+  }
+
+  function exportDayLabel(day) {
+    const n = parseDayNum(day);
+    return n ? `Day ${n}` : (norm(day) || "");
+  }
+
+  function excelSheetName(raw, used) {
+    let n = String(raw || "Sheet").replace(/[:\\/?*[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "Sheet";
+    let base = n;
+    let i = 2;
+    while (used.has(n.toLowerCase())) {
+      const suffix = ` ${i++}`;
+      n = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
+    }
+    used.add(n.toLowerCase());
+    return n;
+  }
+
+  function csvEscape(v) {
+    const s = String(v ?? "");
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  function buildExportPack({ title, dayCount, rows, guides, maxRowsPerPage } = {}) {
+    const tripTitle = String(title || "Imported trip").replace(/\s*total\s*days.*/i, "").trim() || "Imported trip";
+    const allRows = (rows || []).map((r) => ({
+      date: fmtExportDate(r.date),
+      day: exportDayLabel(r.day),
+      location: cleanCity(r.location) || "Other",
+      time: isTimeOnly(r.time) ? norm(r.time) : "",
+      place: r.placeholder ? "" : norm(r.place),
+      notes: norm(r.notes),
+      category: norm(r.category),
+      url: extractUrl(r.url) || (/^https?:\/\//i.test(norm(r.url)) ? norm(r.url) : ""),
+    }));
+    const byCity = [];
+    const idx = new Map();
+    for (const row of allRows) {
+      const city = row.location || "Other";
+      if (!idx.has(city)) {
+        idx.set(city, byCity.length);
+        byCity.push({ city, rows: [] });
+      }
+      byCity[idx.get(city)].rows.push(row);
+    }
+    const limit = Number(maxRowsPerPage) > 0 ? Number(maxRowsPerPage) : PDF_ROWS_PER_PAGE;
+    const pages = [];
+    const totalDays = Number(dayCount) > 0 ? Number(dayCount) : new Set(allRows.map((r) => r.date || r.day).filter(Boolean)).size;
+    pages.push({
+      kind: "overview",
+      title: `${tripTitle} Trip Planner Total Days ${totalDays || byCity.length}`,
+      city: "",
+      rows: [],
+      guides: [],
+    });
+    for (const group of byCity) {
+      const chunks = [];
+      for (let i = 0; i < group.rows.length || !chunks.length; i += limit) {
+        chunks.push(group.rows.slice(i, i + limit));
+        if (!group.rows.length) break;
+      }
+      chunks.forEach((chunk, i) => {
+        pages.push({
+          kind: i === 0 ? "itinerary" : "continuation",
+          title: i === 0 ? `${group.city} Itinerary` : `${group.city} (continued)`,
+          city: group.city,
+          rows: chunk,
+          guides: [],
+        });
+      });
+    }
+    for (const g of guides || []) {
+      const city = cleanCity(g.city) || "";
+      const heading = /getting\s*around/i.test(g.title || "")
+        ? String(g.title).trim()
+        : (city ? `Getting Around ${city}` : (g.title || "Getting Around"));
+      pages.push({
+        kind: "guide",
+        title: heading,
+        city,
+        rows: [],
+        guides: [{ title: heading, body: norm(g.body), city }],
+      });
+    }
+    return {
+      title: tripTitle,
+      dayCount: totalDays,
+      pages,
+      rows: allRows,
+      guides: (guides || []).map((g) => ({ title: g.title, body: g.body, city: g.city || "" })),
+    };
+  }
+
+  function exportCsv(pack) {
+    const lines = [];
+    const cover = pack.pages.find((p) => p.kind === "overview");
+    if (cover?.title) lines.push(cover.title);
+    let headerWritten = false;
+    for (const page of pack.pages || []) {
+      if (page.kind === "overview") continue;
+      if (page.kind === "guide") {
+        const g = page.guides?.[0];
+        if (!g) continue;
+        lines.push("");
+        lines.push(g.title || page.title);
+        if (g.body) {
+          for (const bodyLine of String(g.body).split(/\r?\n/)) lines.push(bodyLine);
+        }
+        continue;
+      }
+      if (page.city) lines.push(`${page.city} Itinerary`);
+      if (!headerWritten) {
+        lines.push(EXPORT_HEADER.map(csvEscape).join(","));
+        headerWritten = true;
+      }
+      for (const r of page.rows || []) {
+        lines.push([r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url].map(csvEscape).join(","));
+      }
+    }
+    return `\uFEFF${lines.join("\n")}\n`;
+  }
+
+  function exportXlsxSheets(pack) {
+    const used = new Set();
+    const sheets = [];
+    const cover = pack.pages.find((p) => p.kind === "overview");
+    sheets.push({
+      name: excelSheetName("Overview", used),
+      kind: "overview",
+      aoa: [[cover?.title || `${pack.title} Trip Planner Total Days ${pack.dayCount || ""}`]],
+    });
+    const cityRows = new Map();
+    for (const page of pack.pages || []) {
+      if (page.kind !== "itinerary" && page.kind !== "continuation") continue;
+      const city = page.city || "Other";
+      if (!cityRows.has(city)) cityRows.set(city, []);
+      cityRows.get(city).push(...(page.rows || []));
+    }
+    for (const [city, rows] of cityRows) {
+      const aoa = [
+        [`${city} Itinerary`],
+        EXPORT_HEADER,
+        ...rows.map((r) => [r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url]),
+      ];
+      sheets.push({ name: excelSheetName(`${city} Itinerary`, used), kind: "itinerary", aoa });
+    }
+    for (const page of pack.pages || []) {
+      if (page.kind !== "guide") continue;
+      const g = page.guides?.[0];
+      const aoa = [[g?.title || page.title], ...(String(g?.body || "").split(/\r?\n/).map((line) => [line]))];
+      sheets.push({ name: excelSheetName(g?.title || page.title || "Getting Around", used), kind: "guide", aoa });
+    }
+    return sheets;
+  }
+
+  function exportXlsx(pack) {
+    if (typeof XLSX === "undefined") throw new Error("Excel library not loaded");
+    const wb = XLSX.utils.book_new();
+    for (const sheet of exportXlsxSheets(pack)) {
+      const ws = XLSX.utils.aoa_to_sheet(sheet.aoa);
+      XLSX.utils.book_append_sheet(wb, ws, sheet.name);
+    }
+    return XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  }
+
+  function toWinAnsi(s) {
+    return String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\x20-\x7E]/g, "?")
+      .slice(0, 160);
+  }
+
+  function pdfEscape(s) {
+    return toWinAnsi(s).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  }
+
+  function wrapText(s, width) {
+    const words = String(s || "").split(/\s+/).filter(Boolean);
+    const lines = [];
+    let cur = "";
+    for (const w of words) {
+      const next = cur ? `${cur} ${w}` : w;
+      if (next.length > width && cur) {
+        lines.push(cur);
+        cur = w;
+      } else cur = next;
+    }
+    if (cur) lines.push(cur);
+    return lines.length ? lines : [""];
+  }
+
+  function layoutExportPdfPages(pack) {
+    const pages = [];
+    for (const page of pack.pages || []) {
+      const items = [];
+      if (page.kind === "overview") {
+        items.push({ x: PDF_COL_X[0], y: 520, str: page.title || pack.title, size: 16 });
+        items.push({ x: PDF_COL_X[0], y: 490, str: "Cover page", size: 11 });
+        pages.push({ kind: page.kind, title: page.title, items });
+        continue;
+      }
+      if (page.kind === "guide") {
+        const g = page.guides?.[0];
+        items.push({ x: PDF_COL_X[0], y: 560, str: g?.title || page.title, size: 14 });
+        let y = 536;
+        for (const line of wrapText(g?.body || "", 90)) {
+          items.push({ x: PDF_COL_X[0], y, str: line, size: 10 });
+          y -= 14;
+          if (y < 40) break;
+        }
+        pages.push({ kind: page.kind, title: page.title, items });
+        continue;
+      }
+      items.push({ x: PDF_COL_X[0], y: 580, str: `${page.city || "Trip"} Itinerary`, size: 14 });
+      EXPORT_HEADER.forEach((h, i) => items.push({ x: PDF_COL_X[i], y: 556, str: h, size: 9 }));
+      let y = 538;
+      for (const r of page.rows || []) {
+        const vals = [r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url];
+        vals.forEach((v, i) => {
+          const max = i === 4 ? 48 : (i === 6 ? 28 : (i === 7 ? 36 : (i === 5 ? 24 : 18)));
+          const str = String(v || "").slice(0, max);
+          if (str) items.push({ x: PDF_COL_X[i], y, str, size: 9 });
+        });
+        y -= 16;
+      }
+      pages.push({ kind: page.kind, title: page.title, items });
+    }
+    return pages;
+  }
+
+  function exportPdfPages(pack) {
+    return layoutExportPdfPages(pack).map((page, i) => {
+      const byY = new Map();
+      for (const it of page.items) {
+        const y = Math.round(it.y / 2) * 2;
+        if (!byY.has(y)) byY.set(y, []);
+        byY.get(y).push({ x: it.x, str: it.str });
+      }
+      const ys = [...byY.keys()].sort((a, b) => b - a);
+      const lines = ys.map((y) => {
+        const cells = byY.get(y).sort((a, b) => a.x - b.x);
+        return { cells, tab: cells.map((c) => c.str).join("\t"), line: cells.map((c) => c.str).join(" ") };
+      });
+      return { pageNum: i + 1, lines };
+    });
+  }
+
+  function exportPdf(pack) {
+    const laid = layoutExportPdfPages(pack);
+    const objects = [];
+    const add = (s) => { objects.push(s); return objects.length; };
+    add("<< /Type /Catalog /Pages 2 0 R >>");
+    add("<< /Type /Pages /Kids [] /Count 0 >>");
+    const contentIds = laid.map((page) => {
+      const ops = ["BT"];
+      let lastSize = 0;
+      for (const it of page.items) {
+        const size = it.size || 10;
+        if (size !== lastSize) {
+          ops.push(`/F1 ${size} Tf`);
+          lastSize = size;
+        }
+        ops.push(`1 0 0 1 ${Number(it.x).toFixed(2)} ${Number(it.y).toFixed(2)} Tm`);
+        ops.push(`(${pdfEscape(it.str)}) Tj`);
+      }
+      ops.push("ET");
+      const stream = ops.join("\n");
+      return add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    });
+    const fontId = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    const pageIds = laid.map((_, i) => add(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_W} ${PDF_PAGE_H}] /Contents ${contentIds[i]} 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> >>`
+    ));
+    objects[1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`;
+    let out = "%PDF-1.4\n";
+    const offsets = [0];
+    for (let i = 0; i < objects.length; i++) {
+      offsets.push(out.length);
+      out += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+    }
+    const xref = out.length;
+    out += `xref\n0 ${objects.length + 1}\n`;
+    out += "0000000000 65535 f \n";
+    for (let i = 1; i <= objects.length; i++) {
+      out += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+    }
+    out += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+    const bytes = new Uint8Array(out.length);
+    for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xff;
+    return bytes;
+  }
+
   return {
     parseFile, parseFileForPicker, parseDelimited, parseXlsx, parsePdf, parseItineraryPages, describePdfPages,
-    parsedFromPages, buildTripDraft,
-    parsePlannerDate, headerKey, locationCountryHint, countryIso, cityFromItineraryLine,
+    parsedFromPages, buildTripDraft, buildExportPack, exportCsv, exportXlsx, exportXlsxSheets, exportPdf, exportPdfPages,
+    parsePlannerDate, headerKey, locationCountryHint, countryIso, cityFromItineraryLine, zipItineraryPaths,
   };
 })();
