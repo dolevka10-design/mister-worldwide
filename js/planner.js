@@ -593,7 +593,21 @@ window.WorldPlanner = (() => {
     return true;
   }
 
+  function defaultDateRange(offsetDays = 0) {
+    const start = new Date();
+    start.setDate(start.getDate() + offsetDays);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    return {
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
+    };
+  }
+
   function countryRowHtml(countries, idx, row = {}) {
+    const defaults = defaultDateRange(idx * 7);
+    const startDate = row.startDate || defaults.startDate;
+    const endDate = row.endDate || defaults.endDate;
     const opts = countries.map((c) =>
       `<option value="${esc(c.id)}" ${c.id === row.countryId ? "selected" : ""}>${esc(c.name)}</option>`
     ).join("");
@@ -601,19 +615,24 @@ window.WorldPlanner = (() => {
       <div class="trip-country-row" data-row="${idx}">
         <select class="new-seg-country pill-select">${opts}</select>
         <input class="new-seg-city pill-select" placeholder="City" value="${esc(row.city || "")}" />
-        <label class="field field-inline"><span class="muted">Start</span><input class="new-seg-start pill-select" type="date" value="${esc(row.startDate || "")}" /></label>
-        <label class="field field-inline"><span class="muted">End</span><input class="new-seg-end pill-select" type="date" value="${esc(row.endDate || "")}" /></label>
+        <label class="field field-inline"><span class="muted">Start</span><input class="new-seg-start pill-select" type="date" value="${esc(startDate)}" /></label>
+        <label class="field field-inline"><span class="muted">End</span><input class="new-seg-end pill-select" type="date" value="${esc(endDate)}" /></label>
         <button type="button" class="btn btn-ghost btn-sm" data-act="remove-create-row" aria-label="Remove">✕</button>
       </div>`;
   }
 
   function collectCreateRows() {
     const rows = [];
-    document.querySelectorAll(".trip-country-row").forEach((el) => {
+    document.querySelectorAll(".trip-country-row").forEach((el, idx) => {
       const countryId = el.querySelector(".new-seg-country")?.value;
       const city = el.querySelector(".new-seg-city")?.value?.trim() || "Other";
-      const startDate = el.querySelector(".new-seg-start")?.value || null;
-      const endDate = el.querySelector(".new-seg-end")?.value || null;
+      let startDate = el.querySelector(".new-seg-start")?.value || "";
+      let endDate = el.querySelector(".new-seg-end")?.value || "";
+      if (!startDate || !endDate) {
+        const d = defaultDateRange(idx * 7);
+        startDate = startDate || d.startDate;
+        endDate = endDate || d.endDate;
+      }
       if (countryId) rows.push({ countryId, city, startDate, endDate });
     });
     return rows;
@@ -685,10 +704,7 @@ window.WorldPlanner = (() => {
       <section class="planner-rail">
         <div class="planner-rail-actions">
           <button type="button" class="btn btn-primary" data-act="new-trip">+ New trip</button>
-          <label class="btn btn-secondary planner-import-btn">
-            Import Excel/PDF
-            <input id="planner-import-file" type="file" accept=".xlsx,.xls,.csv,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
-          </label>
+          <button type="button" class="btn btn-secondary" data-act="import-pick">Import Excel/PDF</button>
         </div>
         ${trips.length ? `<div class="planner-trip-chips">
           ${trips.map((t) => `
@@ -929,15 +945,17 @@ window.WorldPlanner = (() => {
       row?.remove();
       return;
     }
+    if (act === "import-pick") {
+      e.preventDefault();
+      $("planner-import-file")?.click();
+      return;
+    }
     if (act === "create-trip") {
       const segments = collectCreateRows();
       const name = $("new-trip-name")?.value?.trim() || "My trip";
-      if (!segments.length) return WorldApp.toast("Add at least one country with dates", "warn");
-      for (const s of segments) {
-        if (!s.startDate || !s.endDate) return WorldApp.toast("Each country needs start and end dates", "warn");
-      }
+      if (!segments.length) return WorldApp.toast("Pick at least one country", "warn");
       const created = createTrip(state, { name, segments });
-      return openTrip(state, created.id, { flush: true, toast: "Trip created" });
+      return openTrip(state, created.id, { toast: "Trip created — saved on this device" });
     }
     if (act === "save") {
       persistLive({ flush: true, toast: "Trip saved" });
@@ -1091,7 +1109,7 @@ window.WorldPlanner = (() => {
       const state = WorldApp.getState();
       const trip = await importDraft(state, draft);
       showCreate = false;
-      persistLive({ flush: true, toast: `Imported ${draft.rowCount} rows · review below`, scroll: "#planner-trip-doc" });
+      persistLive({ toast: `Imported ${draft.rowCount} rows · saved on this device`, scroll: "#planner-trip-doc" });
       return trip;
     } catch (err) {
       WorldApp.toast(err.message || "Import failed", "error");
@@ -1185,12 +1203,10 @@ window.WorldPlanner = (() => {
     panel?.addEventListener("click", onClick);
     panel?.addEventListener("change", onChange);
     panel?.addEventListener("focusout", onBlur);
-    panel?.addEventListener("change", (e) => {
-      if (e.target?.id === "planner-import-file" && e.target.files?.[0]) {
-        const file = e.target.files[0];
-        e.target.value = "";
-        onImportFile(file);
-      }
+    $("planner-import-file")?.addEventListener("change", (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (file) onImportFile(file);
     });
     $("tam-cancel")?.addEventListener("click", hideAddToTripModal);
     $("tam-confirm")?.addEventListener("click", confirmAddToTrip);

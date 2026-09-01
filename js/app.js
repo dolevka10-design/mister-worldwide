@@ -20,8 +20,9 @@ window.WorldApp = (() => {
     if (!el) return;
     el.textContent = msg;
     el.className = `toast toast-${type} show`;
+    el.setAttribute("aria-live", "polite");
     clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.remove("show"), 3200);
+    el._t = setTimeout(() => el.classList.remove("show"), type === "error" ? 4200 : 2800);
   }
 
   function persist({ touchPlanner } = {}) {
@@ -547,6 +548,8 @@ window.WorldApp = (() => {
     bindUi();
     bindAuth();
     watchMainView();
+    WorldPlanner?.init?.();
+    WorldImportPanel?.init?.();
     await WorldStore.loadSeed();
     state = WorldStore.reconcileState(WorldStore.loadState());
     CountryMeta.init(state.countries);
@@ -566,12 +569,15 @@ window.WorldApp = (() => {
     }
 
     WorldCloud.onAuthStateChanged(async (u, err) => {
-      if (err) toast(err.message, "error");
+      if (err) {
+        const quota = WorldCloud.isQuotaError?.(err);
+        toast(
+          quota ? "Cloud sync unavailable (quota). Planner still works on this device." : err.message,
+          quota ? "warn" : "error"
+        );
+      }
       await onUser(u);
     });
-
-    WorldPlanner?.init?.();
-    WorldImportPanel?.init?.();
   }
 
   return {

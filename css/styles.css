@@ -510,12 +510,15 @@ html, body {
   max-width: 100%;
   box-sizing: border-box;
   color-scheme: dark;
-  -webkit-appearance: none;
-  appearance: none;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
+}
+.planner-body input:not([type="date"]),
+.planner-body select {
+  -webkit-appearance: none;
+  appearance: none;
 }
 .planner-body input[type="date"]::-webkit-date-and-time-value { text-align: left; }
 .planner-controls-inline {
@@ -631,6 +634,15 @@ html, body {
 
 /* Planner polish */
 .planner-empty { padding: 1rem; margin-bottom: 1rem; width: 100%; box-sizing: border-box; }
+.sr-file {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
 .field-inline { margin-bottom: 0; gap: 0.25rem; }
 .field-inline span { font-size: 0.72rem; }
 .segment-card-highlight {
@@ -652,14 +664,18 @@ input[type="date"].pill-select,
   background-color: var(--bg) !important;
   color: var(--text) !important;
   color-scheme: dark;
-  -webkit-appearance: none;
-  appearance: none;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 0.55rem 0.7rem;
+  padding: 0.45rem 0.6rem;
   box-sizing: border-box;
+  -webkit-appearance: auto;
+  appearance: auto;
 }
-input[type="date"].pill-select::-webkit-date-and-time-value { text-align: left; min-height: 1.25em; }
+input[type="date"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-date-and-time-value {
+  color: var(--text);
+  min-height: 1.25em;
+}
 .planner-empty h3 { margin: 0 0 0.35rem; font-size: 1rem; }
 .planner-trip-bar { padding: 0.65rem 0.75rem; margin-bottom: 0.65rem; }
 .planner-trip-bar label { font-size: 0.72rem; display: block; margin-bottom: 0.25rem; }
@@ -1078,7 +1094,7 @@ input[type="date"].pill-select::-webkit-date-and-time-value { text-align: left; 
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%) translateY(120%);
   background: var(--card);
   border: 1px solid var(--border);
@@ -1088,9 +1104,11 @@ input[type="date"].pill-select::-webkit-date-and-time-value { text-align: left; 
   transition: transform 0.25s;
   font-size: 0.82rem;
   max-width: calc(100vw - 2rem);
+  pointer-events: none;
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
 .toast-error { border-color: var(--danger); color: #ffb4bc; }
+.toast-warn { border-color: #c9a227; color: #ffe9a8; }
 
 .assist-fab.open { background: var(--card); }
 .assist-head-actions .btn-sm { padding: 0.4rem 0.35rem; font-size: 0.72rem; }
