@@ -925,6 +925,67 @@ input[type="date"]::-webkit-date-and-time-value {
 .day-category-section { padding: 0.75rem; margin-bottom: 0.65rem; }
 .day-category-title { margin: 0 0 0.55rem; font-size: 0.88rem; color: var(--accent); }
 .activity-list { display: grid; gap: 0.55rem; }
+.activity-list-rows { gap: 0.35rem; }
+.activity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(124, 240, 255, 0.15);
+}
+.activity-row:active { background: rgba(124, 240, 255, 0.08); }
+.activity-row-text {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+.activity-row-meta {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.activity-detail-modal { width: min(100%, 26rem); }
+.activity-detail-place {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.activity-detail-fields {
+  margin: 0 0 0.85rem;
+  display: grid;
+  gap: 0.45rem;
+}
+.activity-detail-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.5rem;
+  align-items: start;
+  font-size: 0.85rem;
+}
+.activity-detail-row dt {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+.activity-detail-row dd {
+  margin: 0;
+  word-break: break-word;
+}
+.activity-detail-actions { flex-wrap: wrap; }
 .activity-card {
   border: 1px solid var(--border);
   border-radius: 12px;

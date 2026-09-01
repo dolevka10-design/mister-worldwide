@@ -28,6 +28,7 @@ window.WorldPlanner = (() => {
   let activeDayNum = 1;
   let routeEditorOpen = false;
   let tripListOpen = true;
+  let activityDetailCtx = null;
 
   let lastActionAt = 0;
   let lastActionKey = "";
@@ -672,6 +673,10 @@ window.WorldPlanner = (() => {
         placeId: place?.id || "",
         slot: PlaceCategorize.defaultSlot(cat),
         lat, lng,
+        importDate: row.date || "",
+        importDay: row.day || null,
+        importLocation: rowCity,
+        importCategoryLabel: row.category || "",
       };
     }
 
@@ -1005,6 +1010,69 @@ window.WorldPlanner = (() => {
       </section>`;
   }
 
+  function renderActivityRow(item, day) {
+    return `<button type="button" class="activity-row" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${day.day}">
+      <span class="activity-row-text">${esc(item.name || "Activity")}</span>
+      ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
+    </button>`;
+  }
+
+  function hideActivityDetail() {
+    activityDetailCtx = null;
+    const modal = $("activity-detail-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function showActivityDetail(state, trip, dayNum, itemId) {
+    const day = trip.days?.[dayNum - 1];
+    if (!day) return;
+    const item = itemsOf(day).find((i) => i.id === itemId);
+    if (!item) return;
+    const seg = segmentForDay(trip, dayNum);
+    const country = state.countries.find((c) => c.id === seg?.countryId);
+    const href = mapsHref(item, item.importLocation || seg?.city, country?.name);
+    const place = item.placeId ? (state.places || []).find((p) => p.id === item.placeId) : null;
+    const canPin = !!(item.lat ?? place?.lat) || !!seg?.countryId;
+
+    activityDetailCtx = { state, tripId: trip.id, dayNum, itemId };
+
+    const titleEl = $("adm-title");
+    const placeEl = $("adm-place");
+    const fieldsEl = $("adm-fields");
+    if (titleEl) titleEl.textContent = PlaceCategorize.plannerLabel(item.category);
+    if (placeEl) placeEl.textContent = item.name || "Activity";
+
+    const dayLabel = item.importDay ? `Day ${item.importDay}` : `Day ${dayNum}`;
+    const rows = [
+      ["Date", day.date ? fmtDate(day.date) : (item.importDate ? fmtDate(item.importDate) : "—")],
+      ["Day", dayLabel],
+      ["City", item.importLocation || seg?.city || "—"],
+      ["Country", country?.name || "—"],
+      ["Time", item.time || "—"],
+      ["Category", item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category)],
+      ["Notes", item.notes || "—"],
+    ];
+    if (fieldsEl) {
+      fieldsEl.innerHTML = rows.map(([label, value]) =>
+        `<div class="activity-detail-row"><dt>${esc(label)}</dt><dd>${value === "—" ? "<span class='muted'>—</span>" : esc(value)}</dd></div>`
+      ).join("");
+      if (href) {
+        fieldsEl.innerHTML += `<div class="activity-detail-row"><dt>Maps</dt><dd><a class="place-link" href="${esc(href)}" target="_blank" rel="noopener">${esc(href)}</a></dd></div>`;
+      }
+    }
+
+    const mapsBtn = $("adm-maps");
+    if (mapsBtn) {
+      if (href) { mapsBtn.href = href; mapsBtn.hidden = false; }
+      else { mapsBtn.hidden = true; }
+    }
+    const globeBtn = $("adm-globe");
+    if (globeBtn) globeBtn.hidden = !canPin;
+
+    const modal = $("activity-detail-modal");
+    if (modal) modal.hidden = false;
+  }
+
   function renderActivityCard(item, day, seg, country, state) {
     const href = mapsHref(item, seg?.city, country?.name);
     const catLabel = PlaceCategorize.plannerLabel(item.category);
@@ -1090,24 +1158,13 @@ window.WorldPlanner = (() => {
         </div>
         <div class="day-map-bar card">
           <button type="button" class="btn btn-secondary" data-act="day-map" data-day="${day.day}">🌍 Map this day on globe</button>
-          <ul class="day-location-list">
-            ${itemsOf(day).map((item, idx) => {
-              const place = item.placeId ? (state.places || []).find((p) => p.id === item.placeId) : null;
-              const hasCoords = Number.isFinite(item.lat ?? place?.lat) && Number.isFinite(item.lng ?? place?.lng);
-              return `<li class="day-location-item">
-                <span class="day-loc-num">${idx + 1}</span>
-                <span class="day-loc-name">${esc(item.time ? `${item.time} · ` : "")}${esc(item.name)}</span>
-                ${hasCoords ? `<button type="button" class="btn btn-ghost btn-sm" data-act="pin-globe" data-item="${esc(item.id)}" data-day="${day.day}">Globe</button>` : ""}
-              </li>`;
-            }).join("") || '<li class="muted">No locations with coordinates yet</li>'}
-          </ul>
         </div>
         <div class="day-sections">
           ${groups.length ? groups.map((g) => `
             <section class="day-category-section card">
               <h3 class="day-category-title">${categoryIcon(g.category)} ${esc(PlaceCategorize.plannerLabel(g.category))}</h3>
-              <div class="activity-list">
-                ${g.items.map((item) => renderActivityCard(item, day, seg, country, state)).join("")}
+              <div class="activity-list activity-list-rows">
+                ${g.items.map((item) => renderActivityRow(item, day)).join("")}
               </div>
             </section>`).join("") : '<p class="muted day-empty">No activities yet — add one below.</p>'}
         </div>
@@ -1396,6 +1453,10 @@ window.WorldPlanner = (() => {
     if (act === "day-map") {
       if (!trip) return;
       return showDayOnGlobe(state, trip, Number(actEl.dataset.day) || activeDayNum);
+    }
+    if (act === "activity-detail") {
+      if (!trip) return;
+      return showActivityDetail(state, trip, Number(actEl.dataset.day), actEl.dataset.item);
     }
     if (act === "save") {
       persistLive({ flush: true, toast: "Trip saved" });
@@ -1701,6 +1762,21 @@ window.WorldPlanner = (() => {
     $("tam-confirm")?.addEventListener("click", confirmAddToTrip);
     $("trip-add-modal")?.addEventListener("click", (e) => {
       if (e.target.id === "trip-add-modal") hideAddToTripModal();
+    });
+    $("adm-close")?.addEventListener("click", hideActivityDetail);
+    $("activity-detail-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "activity-detail-modal") hideActivityDetail();
+    });
+    $("adm-globe")?.addEventListener("click", () => {
+      if (!activityDetailCtx) return;
+      const state = WorldApp.getState();
+      const trip = ensurePlanner(state).trips.find((t) => t.id === activityDetailCtx.tripId);
+      if (!trip) return;
+      const day = trip.days[activityDetailCtx.dayNum - 1];
+      const item = itemsOf(day).find((i) => i.id === activityDetailCtx.itemId);
+      if (!item) return;
+      pinItemOnGlobe(state, trip, activityDetailCtx.dayNum, item);
+      hideActivityDetail();
     });
   }
 

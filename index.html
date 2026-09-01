@@ -163,6 +163,19 @@
       </form>
     </section>
 
+    <div id="activity-detail-modal" class="modal-overlay" hidden>
+      <div class="modal card activity-detail-modal" role="dialog" aria-labelledby="adm-title">
+        <h3 id="adm-title">Activity</h3>
+        <p class="activity-detail-place" id="adm-place"></p>
+        <dl class="activity-detail-fields" id="adm-fields"></dl>
+        <div class="modal-actions activity-detail-actions">
+          <button type="button" class="btn btn-ghost" id="adm-close">Close</button>
+          <a class="btn btn-secondary" id="adm-maps" href="#" target="_blank" rel="noopener" hidden>Maps</a>
+          <button type="button" class="btn btn-primary" id="adm-globe" hidden>Globe</button>
+        </div>
+      </div>
+    </div>
+
     <div id="trip-add-modal" class="modal-overlay" hidden>
       <div class="modal card" role="dialog" aria-labelledby="tam-title">
         <h3 id="tam-title">Add to trip</h3>

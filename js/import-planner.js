@@ -441,8 +441,8 @@ window.WorldPlannerImport = (() => {
     return normalizeRow(raw, fallbackLocation, ctx);
   }
 
-  async function extractPdfLines(pdf) {
-    const allLines = [];
+  async function extractPdfPages(pdf) {
+    const pages = [];
     let title = "";
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
@@ -458,14 +458,116 @@ window.WorldPlannerImport = (() => {
         row.cells.push({ x, str });
       }
       buckets.sort((a, b) => b.y - a.y);
+      const lines = [];
       for (const row of buckets) {
         row.cells.sort((a, b) => a.x - b.x);
         const line = row.cells.map((c) => c.str).join(" ");
         if (/trip planner/i.test(line) && !title) title = line.replace(/total days.*/i, "").trim();
-        allLines.push({ cells: row.cells, tab: row.cells.map((c) => c.str).join("\t"), line });
+        lines.push({ cells: row.cells, tab: row.cells.map((c) => c.str).join("\t"), line });
       }
+      pages.push({ pageNum: p, lines });
     }
-    return { allLines, title };
+    return { pages, title };
+  }
+
+  async function extractPdfLines(pdf) {
+    const { pages, title } = await extractPdfPages(pdf);
+    const allLines = pages.flatMap((pg) => pg.lines);
+    return { allLines, pages, title };
+  }
+
+  const ITINERARY_CITY = /new\s*york|niagara\s*falls|washington|boston|chicago|philadelphia|los\s*angeles|san\s*francisco|las\s*vegas|miami|seattle|austin|denver|portland|orlando|atlanta|dallas|houston|new\s*orleans|san\s*diego|vancouver|toronto|montreal|london|paris|rome|barcelona|amsterdam|berlin|tokyo|sydney|melbourne|buenos\s*aires/i;
+
+  function cityFromItineraryLine(line) {
+    const raw = String(line || "").replace(/itinerary/gi, " ").trim();
+    const known = [
+      ["new york", "New York"],
+      ["niagara falls", "Niagara Falls"],
+      ["washington", "Washington"],
+      ["los angeles", "Los Angeles"],
+      ["san francisco", "San Francisco"],
+      ["las vegas", "Las Vegas"],
+      ["new orleans", "New Orleans"],
+      ["san diego", "San Diego"],
+      ["buenos aires", "Buenos Aires"],
+    ];
+    const lower = raw.toLowerCase();
+    for (const [pat, name] of known) {
+      if (lower.includes(pat)) return name;
+    }
+    const m = raw.match(ITINERARY_CITY);
+    if (m) {
+      return m[0].replace(/\s+/g, " ").replace(/\b\w+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    }
+    return cleanCity(raw) || "";
+  }
+
+  function isItineraryPage(page) {
+    const text = page.lines.map((l) => l.line).join(" ");
+    if (/itinerary/i.test(text) && ITINERARY_CITY.test(text)) return true;
+    if (page.lines.some((l) => looksLikeHeader(l.cells.map((c) => c.str)))) return true;
+    const dateRows = page.lines.filter((l) =>
+      /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(l.line) && l.cells.length >= 3
+    ).length;
+    return dateRows >= 2;
+  }
+
+  function isSkipPage(page) {
+    const text = page.lines.map((l) => l.line).join(" ").toLowerCase();
+    if (/total\s*days|party\s*in\s*the\s*usa\s*trip\s*planner|table\s*of\s*contents|cover\s*page|getting\s*around\s*guide/i.test(text)
+      && !/itinerary/i.test(text)) return true;
+    return !isItineraryPage(page);
+  }
+
+  function parseLinesChunk(lines, fallbackLocation, titleOut) {
+    const rows = [];
+    const guides = [];
+    let columns = null;
+    let location = fallbackLocation || "";
+    let ctx = { date: null, day: null, location };
+    for (const { cells, line } of lines) {
+      if (/trip planner/i.test(line) && !titleOut.value) titleOut.value = line.replace(/total days.*/i, "").trim();
+      if (/itinerary/i.test(line) && ITINERARY_CITY.test(line)) {
+        location = cityFromItineraryLine(line) || location;
+        ctx.location = location;
+        continue;
+      }
+      if (looksLikeHeader(cells.map((c) => c.str))) {
+        const detected = detectColumns(cells);
+        if (detected) { columns = detected; continue; }
+      }
+      if (!columns) {
+        const detected = detectColumns(cells);
+        if (detected) { columns = detected; continue; }
+      }
+      if (!columns) continue;
+      const parsed = rowFromPdfColumns(cells, columns, location, ctx);
+      if (!parsed) continue;
+      if (parsed.type === "guide") {
+        guides.push({ title: parsed.title, body: parsed.body, city: parsed.city || location });
+        continue;
+      }
+      if (parsed.date) ctx.date = parsed.date;
+      if (parsed.day) ctx.day = parsed.day;
+      if (parsed.location) { location = parsed.location; ctx.location = parsed.location; }
+      rows.push(parsed);
+    }
+    return { rows, guides };
+  }
+
+  function parseItineraryPages(pages, docTitle) {
+    const rows = [];
+    const guides = [];
+    const titleOut = { value: docTitle || "" };
+    for (const page of pages) {
+      if (isSkipPage(page)) continue;
+      const header = page.lines.find((l) => /itinerary/i.test(l.line) && ITINERARY_CITY.test(l.line));
+      const fallbackLocation = header ? cityFromItineraryLine(header.line) : "";
+      const chunk = parseLinesChunk(page.lines, fallbackLocation, titleOut);
+      rows.push(...chunk.rows);
+      guides.push(...chunk.guides);
+    }
+    return { rows, guides, title: titleOut.value || docTitle || "Imported trip" };
   }
 
   function clusterCellsToColumns(cells) {
@@ -553,11 +655,14 @@ window.WorldPlannerImport = (() => {
     if (typeof pdfjsLib === "undefined") throw new Error("PDF library not loaded");
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    const { allLines, title: pdfTitle } = await extractPdfLines(pdf);
+    const { allLines, pages, title: pdfTitle } = await extractPdfLines(pdf);
     const tabText = allLines.map((l) => l.tab).join("\n");
     const candidates = [];
 
-    // Strategy 1: column header detection on y-bucketed rows
+    // Strategy 0: per-page itinerary sections (New York, Niagara Falls, Washington, …)
+    candidates.push(parseItineraryPages(pages, pdfTitle));
+
+    // Strategy 1: column header detection on all lines
     {
       const rows = [];
       const guides = [];
@@ -786,5 +891,5 @@ window.WorldPlannerImport = (() => {
     };
   }
 
-  return { parseFile, parseDelimited, parseXlsx, parsePdf, buildTripDraft, parsePlannerDate, headerKey };
+  return { parseFile, parseDelimited, parseXlsx, parsePdf, parseItineraryPages, buildTripDraft, parsePlannerDate, headerKey };
 })();
