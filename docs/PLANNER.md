@@ -15,7 +15,7 @@ Key files:
 | `js/store.js` | Seed places + **compact** local/cloud user data |
 | `js/cloud.js` | Firestore save/load (compact payload only) |
 | `js/app.js` | Shell, persist flags, country panel, day-on-globe |
-| `index.html` | Modals: activity detail, **delete trip confirm**, **import summary**, add-to-trip |
+| `index.html` | Modals: activity detail, **delete trip confirm**, **import page picker**, **import summary**, add-to-trip |
 | `css/styles.css` | Planner/day/activity/modal styles |
 | `data/places.json` | ~6.3k seed places (~2.5MB). **Never write this to Firestore.** |
 
@@ -94,7 +94,7 @@ Correct:
 - Same **date** (or same day number when a date is missing) across pages → **one day** with **all cities** (`Istanbul · Cappadocia`) and **all rows**, including **empty placeholder** activity rows.
 - Cities such as Istanbul / Cappadocia map to **Turkey** (`locationCountryHint` + `countryIso`). Missing countries are **created** and persisted as `extraCountries`. Maps URLs and planner categories are stored on the place.
 - Accepts `.xlsx`, `.xls`, `.csv`, `.pdf`, **`.zip`** (CSV/PDF/Excel inside).
-- After import, `#import-summary-modal` lists city · country · counts, then **each new globe place** (name, city, country, category, notes, Maps), with **OK** and **Close**.
+- After parse, `#import-pages-modal` lists **every page** with a checkbox. Itinerary / continuation pages are pre-checked; cover, TOC, and **getting-around** pages are not. Import only the checked pages, then `#import-summary-modal` lists cities and new places.
 
 Tests: `node scripts/test-import-planner.js`
 

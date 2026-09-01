@@ -7,16 +7,18 @@ const ctx = { window: {}, console };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(`${root}/js/categorize.js`, "utf8"), ctx);
 vm.runInContext(fs.readFileSync(`${root}/js/import-planner.js`, "utf8"), ctx);
-const { parseDelimited, parseItineraryPages, buildTripDraft, locationCountryHint, cityFromItineraryLine } = ctx.window.WorldPlannerImport;
+const { parseDelimited, parseItineraryPages, buildTripDraft, locationCountryHint, cityFromItineraryLine, describePdfPages, parsedFromPages } = ctx.window.WorldPlannerImport;
 
+let pageSeq = 0;
 function lineFromTab(tab) {
   const parts = tab.split("\t");
   const cells = parts.map((str, i) => ({ x: i * 80, str }));
   return { cells, tab, line: parts.join(" ") };
 }
 
-function mockPage(tabs) {
-  return { pageNum: 1, lines: tabs.map(lineFromTab) };
+function mockPage(tabs, pageNum) {
+  pageSeq += 1;
+  return { pageNum: pageNum || pageSeq, lines: tabs.map(lineFromTab) };
 }
 
 const splitCityPdf = `
@@ -133,5 +135,44 @@ assert(day1.locations.includes("Istanbul") && day1.locations.includes("Cappadoci
 assert(day1.rows.length >= 5, `day 1 merged rows: ${day1.rows.length}`);
 assert(day1.rows.some((r) => r.placeholder || !r.place), "merged day keeps empty placeholders");
 assert(draft.dayPlans.some((d) => d.date === "2026-10-02"), "day 2 separate date");
+
+const pickerPages = [
+  mockPage(["Party in the USA Trip Planner Total Days 39"]),
+  mockPage([
+    "New York Itinerary",
+    hdr,
+    row("17.09.26", "Day 1", "New York", "05:15", "Landing In EWR", "", "Transportation / Flight"),
+    row("17.09.26", "Day 1", "New York", "", "Times Square", "", "Sightseeing / Attraction"),
+  ]),
+  mockPage([
+    "Getting Around Washington DC",
+    "Ride the E train from Penn Station to Jamaica then AirTrain to JFK. PATH to Newark Penn Station. Port Authority bus. Queens-bound E train.",
+    row("25.09.26", "Day 9", "Washington DC Ride the E train from Penn Station to Jamaica then AirTrain to JFK PATH to Newark", "09:00", "Transit notes", "", "Transportation"),
+  ]),
+  mockPage([
+    "Washington Itinerary",
+    hdr,
+    row("22.09.26", "Day 6", "Washington", "09:00", "National Mall", "", "Sightseeing / Attraction"),
+  ]),
+];
+const pack = describePdfPages(pickerPages, "Party USA");
+assert(pack.pages.length === 4, `picker pages: ${pack.pages.length}`);
+const ny = pack.pages.find((p) => /new york/i.test(p.title));
+const dc = pack.pages.find((p) => /washington itinerary/i.test(p.title));
+const ride = pack.pages.find((p) => /getting around/i.test(p.title) || p.kind === "guide");
+const cover = pack.pages.find((p) => p.kind === "overview" || /cover|overview/i.test(p.title));
+assert(ny?.suggested, "NY itinerary suggested");
+assert(dc?.suggested, "Washington itinerary suggested");
+assert(ride && !ride.suggested, `getting around should not be suggested: ${ride && ride.kind}`);
+if (cover) assert(!cover.suggested, "cover not suggested");
+const picked = parsedFromPages(pack, [ny.id, dc.id]);
+assert(picked.rows.some((r) => /Times Square/i.test(r.place)), "picked NY");
+assert(picked.rows.some((r) => /National Mall/i.test(r.place)), "picked DC");
+assert(!picked.rows.some((r) => /AirTrain/i.test(r.place + r.location)), "did not import getting-around blob");
+const onlyItin = parsedFromPages(pack, pack.pages.filter((p) => p.suggested).map((p) => p.id));
+assert(!onlyItin.rows.some((r) => /AirTrain|Penn Station|Getting Around/i.test(`${r.place} ${r.location}`)), "suggested pages skip transit guide");
+let threw = false;
+try { parsedFromPages(pack, []); } catch { threw = true; }
+assert(threw, "empty selection throws");
 
 process.exit(failed ? 1 : 0);

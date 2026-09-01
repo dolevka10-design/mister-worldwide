@@ -198,6 +198,23 @@
       </div>
     </div>
 
+    <div id="import-pages-modal" class="modal-overlay" hidden>
+      <div class="modal card import-pages-modal" role="dialog" aria-modal="true" aria-labelledby="ipm-title">
+        <h3 id="ipm-title">Choose pages to import</h3>
+        <p class="muted" id="ipm-lead">Check only the itinerary pages you want as trip days.</p>
+        <div class="import-pages-toolbar">
+          <button type="button" class="btn btn-ghost btn-sm" id="ipm-suggested">Suggested</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="ipm-all">All</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="ipm-none">None</button>
+        </div>
+        <ul class="import-pages-list" id="ipm-list"></ul>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="ipm-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="ipm-confirm">Import selected</button>
+        </div>
+      </div>
+    </div>
+
     <div id="import-summary-modal" class="modal-overlay" hidden>
       <div class="modal card import-summary-modal" role="dialog" aria-labelledby="ism-title">
         <h3 id="ism-title">Locations added</h3>

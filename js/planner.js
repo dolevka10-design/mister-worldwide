@@ -31,6 +31,7 @@ window.WorldPlanner = (() => {
   let activityDetailCtx = null;
   let pendingDeleteTrip = null;
   let pendingDeleteItem = null;
+  let pendingImportPack = null;
   let dragState = null;
 
   let lastActionAt = 0;
@@ -2007,20 +2008,90 @@ window.WorldPlanner = (() => {
     }
   }
 
+  async function finishImportedDraft(draft) {
+    const state = WorldApp.getState();
+    const trip = await importDraft(state, draft);
+    WorldStore.saveState(state);
+    enterTripView(state, trip.id, { dayNum: 1, flush: true, toast: `Imported ${draft.rowCount} activities` });
+    const summary = trip.importSummary;
+    delete trip.importSummary;
+    showImportSummary(summary);
+    return trip;
+  }
+
+  function hideImportPagesModal() {
+    pendingImportPack = null;
+    const modal = $("import-pages-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function setImportPageChecks(mode) {
+    const boxes = [...document.querySelectorAll("#ipm-list input[type=checkbox]")];
+    for (const box of boxes) {
+      if (mode === "all") box.checked = true;
+      else if (mode === "none") box.checked = false;
+      else box.checked = box.dataset.suggested === "1";
+    }
+  }
+
+  function showImportPagesModal(pack) {
+    pendingImportPack = pack;
+    const list = $("ipm-list");
+    const lead = $("ipm-lead");
+    const pages = pack.pages || [];
+    if (lead) {
+      const n = pages.filter((p) => p.suggested).length;
+      lead.textContent = `${pages.length} page${pages.length === 1 ? "" : "s"} found. Suggested itinerary pages are checked — uncheck cover, getting-around, and anything you don’t want as a trip day.`;
+      if (n) lead.textContent = `${pages.length} pages · ${n} itinerary page${n === 1 ? "" : "s"} suggested. Uncheck cover / getting-around pages.`;
+    }
+    if (list) {
+      list.innerHTML = pages.map((p) => {
+        const checked = p.suggested ? "checked" : "";
+        const meta = [p.kindLabel, p.preview].filter(Boolean).join(" · ");
+        const pageBit = p.pageNum ? `Page ${p.pageNum}` : "";
+        return `<li>
+          <label class="import-page-row">
+            <input type="checkbox" value="${esc(p.id)}" data-suggested="${p.suggested ? "1" : "0"}" ${checked} />
+            <span class="import-page-copy">
+              <strong>${pageBit ? `${esc(pageBit)} · ` : ""}${esc(p.title)}</strong>
+              <small class="muted">${esc(meta)}</small>
+            </span>
+          </label>
+        </li>`;
+      }).join("");
+    }
+    const modal = $("import-pages-modal");
+    if (modal) modal.hidden = false;
+    try { toggle(true); } catch { /* */ }
+  }
+
+  async function confirmImportPages() {
+    if (!pendingImportPack) return hideImportPagesModal();
+    const ids = [...document.querySelectorAll("#ipm-list input[type=checkbox]:checked")].map((el) => el.value);
+    let parsed;
+    try {
+      parsed = WorldPlannerImport.parsedFromPages(pendingImportPack, ids);
+    } catch (err) {
+      return WorldApp.toast(err.message || "Select itinerary pages", "warn");
+    }
+    hideImportPagesModal();
+    WorldApp.toast("Building trip…");
+    try {
+      const draft = WorldPlannerImport.buildTripDraft(parsed);
+      return await finishImportedDraft(draft);
+    } catch (err) {
+      console.warn("Import failed", err);
+      WorldApp.toast(err.message || "Import failed", "error");
+    }
+  }
+
   async function onImportFile(file) {
     if (!file || !window.WorldPlannerImport) return WorldApp.toast("Importer not loaded", "error");
     WorldApp.toast("Reading itinerary…");
     try {
-      const parsed = await WorldPlannerImport.parseFile(file);
-      const draft = WorldPlannerImport.buildTripDraft(parsed);
-      const state = WorldApp.getState();
-      const trip = await importDraft(state, draft);
-      WorldStore.saveState(state);
-      enterTripView(state, trip.id, { dayNum: 1, flush: true, toast: `Imported ${draft.rowCount} activities` });
-      const summary = trip.importSummary;
-      delete trip.importSummary;
-      showImportSummary(summary);
-      return trip;
+      const pack = await WorldPlannerImport.parseFileForPicker(file);
+      if (!pack?.pages?.length) throw new Error("No pages found in that file");
+      showImportPagesModal(pack);
     } catch (err) {
       console.warn("Import failed", err);
       WorldApp.toast(err.message || "Import failed — try Excel/CSV export from your planner", "error");
@@ -2330,6 +2401,14 @@ window.WorldPlanner = (() => {
     $("ism-close")?.addEventListener("click", hideImportSummary);
     $("import-summary-modal")?.addEventListener("click", (e) => {
       if (e.target.id === "import-summary-modal") hideImportSummary();
+    });
+    $("ipm-cancel")?.addEventListener("click", hideImportPagesModal);
+    $("ipm-confirm")?.addEventListener("click", () => { confirmImportPages(); });
+    $("ipm-suggested")?.addEventListener("click", () => setImportPageChecks("suggested"));
+    $("ipm-all")?.addEventListener("click", () => setImportPageChecks("all"));
+    $("ipm-none")?.addEventListener("click", () => setImportPageChecks("none"));
+    $("import-pages-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "import-pages-modal") hideImportPagesModal();
     });
     $("adm-close")?.addEventListener("click", hideActivityDetail);
     $("activity-detail-modal")?.addEventListener("click", (e) => {

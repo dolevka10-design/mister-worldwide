@@ -72,7 +72,7 @@ In Planner, tap **Import Excel/PDF/ZIP**. Expected columns:
 |------|-----|----------|------------|----------------|-------|----------|------------------|
 | 17.09.26 | Day 1 | New York | 05:15 | Landing in LGA | Flight LY027 | Transportation / Flight | https://maps.google.com/… |
 
-PDF import reads itinerary section pages (city headers like New York / Istanbul / Cappadocia), plus **continuation pages** that keep the same table. Rows that share a **day and date** across pages are merged (all cities + all activities, including empty placeholders). Cover / “total days” pages without a table are skipped. After import, a popup lists each location, country, count, and **every new place** added to the globe. After parser changes, delete the old trip and re-import.
+PDF import lists **every page** in a checkbox popup. Itinerary city pages are pre-checked; cover and getting-around pages are not. Import only what you mark. Same-day rows across selected pages still merge. After that, a second popup lists locations and **every new place** on the globe.
 
 New places from the file are added to the correct country (e.g. Turkey) with category and Maps link.
 
