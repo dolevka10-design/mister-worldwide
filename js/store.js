@@ -204,10 +204,12 @@ window.WorldStore = (() => {
     const lMs = plannerTimestamp(l, null);
     const rMs = plannerTimestamp(r, null);
     const updatedAt = new Date(Math.max(lMs, rMs, Date.now())).toISOString();
+    const activeId = (lMs >= rMs ? l.activeTripId : r.activeTripId) || l.activeTripId || r.activeTripId || trips[0]?.id || null;
+    const viewPick = (lMs >= rMs ? l.view : r.view) || l.view || r.view;
     return {
       trips,
-      activeTripId: (lMs >= rMs ? l.activeTripId : r.activeTripId) || l.activeTripId || r.activeTripId || trips[0]?.id || null,
-      view: (lMs >= rMs ? l.view : r.view) || l.view || r.view || (trips.length ? "list" : "create"),
+      activeTripId: activeId,
+      view: viewPick || (activeId ? "trip" : (trips.length ? "list" : "create")),
       activeDayNum: (lMs >= rMs ? l.activeDayNum : r.activeDayNum) || l.activeDayNum || r.activeDayNum || 1,
       updatedAt,
     };

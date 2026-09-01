@@ -460,6 +460,12 @@ html, body {
 }
 .planner-add-seg-form { margin-bottom: 1rem; font-size: 0.82rem; }
 .planner-panel.open { transform: translateY(0); }
+.planner-panel button[data-act],
+.planner-panel .trip-chip[data-act] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(124, 240, 255, 0.15);
+  cursor: pointer;
+}
 .planner-head {
   display: flex;
   justify-content: space-between;

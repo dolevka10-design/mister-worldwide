@@ -31,29 +31,41 @@ window.WorldPlanner = (() => {
 
   let lastActionAt = 0;
   let lastActionKey = "";
+  let lastTouchKey = "";
 
   function handleAction(actEl, e) {
-    if (!actEl?.dataset?.act) return;
-    const key = `${actEl.dataset.act}:${actEl.dataset.tripId || ""}:${actEl.dataset.day || ""}`;
+    if (!actEl?.dataset?.act || actEl.disabled) return;
+    const key = `${actEl.dataset.act}:${actEl.dataset.tripId || ""}:${actEl.dataset.day || ""}:${actEl.dataset.item || ""}`;
     const now = Date.now();
-    if (key === lastActionKey && now - lastActionAt < 450) return;
+    if (e?.type === "click" && lastTouchKey === key && now - lastActionAt < 600) return;
+    if (e?.type === "touchend") lastTouchKey = key;
     lastActionAt = now;
     lastActionKey = key;
-    if (e?.preventDefault) e.preventDefault();
-    if (e?.stopPropagation) e.stopPropagation();
-    onClick({ target: actEl, preventDefault: () => {}, stopPropagation: () => {} }, actEl);
+    try {
+      onClick({ target: actEl, preventDefault: () => {}, stopPropagation: () => {}, type: e?.type || "click" }, actEl);
+    } catch (err) {
+      console.error("Planner action failed:", actEl.dataset.act, err);
+      WorldApp.toast(err?.message || "Action failed", "error");
+    }
+  }
+
+  function panelPointer(e) {
+    const panel = $("planner-panel");
+    if (!panel || panel.hidden || !open) return;
+    if (!panel.contains(e.target)) return;
+    if (e.target.closest("input, textarea, select, option, a.place-link")) return;
+    const actEl = e.target.closest("button[data-act], .trip-chip[data-act], summary[data-act]");
+    if (!actEl || actEl.disabled) return;
+    if (e.type === "touchend") e.preventDefault();
+    handleAction(actEl, e);
   }
 
   function wirePlannerActions() {
-    const panel = $("planner-panel");
-    if (!panel) return;
-    panel.querySelectorAll("[data-act]").forEach((el) => {
-      el.onclick = (e) => handleAction(el, e);
-    });
+    /* Handled by panelPointer in init — kept for compatibility */
   }
 
   function act(e) {
-    const el = e?.currentTarget || e?.target?.closest?.("[data-act]");
+    const el = e?.currentTarget || e?.target?.closest?.("button[data-act], .trip-chip[data-act]");
     if (el) handleAction(el, e);
   }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
@@ -109,6 +121,7 @@ window.WorldPlanner = (() => {
     if (!p.trips.length && !trip) return "create";
     if (p.view === "trip" && trip) return "trip";
     if (p.view === "create") return "create";
+    if (p.activeTripId && trip) return "trip";
     return "list";
   }
 
@@ -961,13 +974,13 @@ window.WorldPlanner = (() => {
     return `
       <section class="planner-rail">
         <div class="planner-rail-actions">
-          <button type="button" class="btn btn-primary" data-act="new-trip">+ New trip</button>
-          <button type="button" class="btn btn-secondary" data-act="import-pick">Import Excel/PDF</button>
+          <button type="button" class="btn btn-primary" data-act="new-trip" onclick="WorldPlanner.act(event)">+ New trip</button>
+          <button type="button" class="btn btn-secondary" data-act="import-pick" onclick="WorldPlanner.act(event)">Import Excel/PDF</button>
         </div>
         ${trips.length ? `<div class="planner-trip-chips">
           ${trips.map((t) => `
             <div class="trip-chip-row">
-              <button type="button" class="trip-chip ${t.id === activeId ? "active" : ""}" data-act="open-trip" data-trip-id="${esc(t.id)}">
+              <button type="button" class="trip-chip ${t.id === activeId ? "active" : ""}" data-act="open-trip" data-trip-id="${esc(t.id)}" onclick="WorldPlanner.act(event)">
                 <strong>${esc(t.name)}</strong>
                 <span class="muted">${esc(formatTripDates(t))}</span>
               </button>
@@ -987,7 +1000,7 @@ window.WorldPlanner = (() => {
         <div id="new-trip-rows" class="trip-country-rows">${countryRowHtml(countries, 0)}</div>
         <div class="planner-actions">
           <button type="button" class="btn btn-ghost" data-act="add-create-row">+ Country</button>
-          <button type="button" class="btn btn-primary" data-act="create-trip">Create trip</button>
+          <button type="button" class="btn btn-primary" data-act="create-trip" onclick="WorldPlanner.act(event)">Create trip</button>
         </div>
       </section>`;
   }
@@ -1194,7 +1207,7 @@ window.WorldPlanner = (() => {
     const view = plannerView(state);
     const showList = view === "list";
     const showTrip = view === "trip" && !!trip;
-    const showCreateForm = view === "create" || (!trips.length && !trip);
+    const showCreateForm = view === "create" && !showTrip;
 
     panel.innerHTML = `
       <header class="planner-head">
@@ -1243,6 +1256,9 @@ window.WorldPlanner = (() => {
     if (!trip) return null;
     const n = clampDayNum(trip, dayNum);
     setPlannerView(state, "trip", tripId, n);
+    state.planner.view = "trip";
+    state.planner.activeTripId = tripId;
+    state.planner.activeDayNum = n;
     activeDayNum = n;
     trip.activeDayNum = n;
     showCreate = false;
@@ -1255,14 +1271,16 @@ window.WorldPlanner = (() => {
       panel.hidden = false;
     }
     try {
-      sessionStorage.setItem("plannerNav", JSON.stringify({ view: "trip", tripId, dayNum: n }));
+      sessionStorage.setItem("plannerNav", JSON.stringify({ view: "trip", tripId, dayNum: n, ts: Date.now() }));
     } catch { /* */ }
     WorldStore.saveState(state);
     render(state);
     scrollPlannerToDay();
     WorldApp.persist({ touchPlanner: true });
     if (flush && WorldCloud?.configured) {
-      WorldApp.persistPlanner({ flush: true, skipPlannerRender: true }).catch(() => {});
+      setTimeout(() => {
+        WorldApp.persistPlanner({ flush: true, skipPlannerRender: true }).catch(() => {});
+      }, 300);
     }
     if (msg) WorldApp.toast(msg);
     return trip;
@@ -1270,7 +1288,7 @@ window.WorldPlanner = (() => {
 
   function finishCreateTrip(state, created) {
     if (!created?.id) return WorldApp.toast("Could not create trip", "error");
-    enterTripView(state, created.id, { dayNum: 1, flush: true, toast: "Trip created" });
+    enterTripView(state, created.id, { dayNum: 1, flush: false, toast: "Trip created" });
   }
 
   function onClick(e, actElIn) {
@@ -1308,8 +1326,6 @@ window.WorldPlanner = (() => {
       return render(state);
     }
     if (act === "open-trip") {
-      e.preventDefault();
-      e.stopPropagation();
       return enterTripView(state, actEl.dataset.tripId, { dayNum: 1 });
     }
     if (act === "delete-trip") {
@@ -1364,8 +1380,6 @@ window.WorldPlanner = (() => {
       return;
     }
     if (act === "create-trip") {
-      e.preventDefault();
-      e.stopPropagation();
       try {
         const segments = collectCreateRows();
         const name = $("new-trip-name")?.value?.trim() || "My trip";
@@ -1671,6 +1685,8 @@ window.WorldPlanner = (() => {
     if (!panel) return;
     bound = true;
     $("btn-planner")?.addEventListener("click", () => toggle(true));
+    panel.addEventListener("click", panelPointer, true);
+    panel.addEventListener("touchend", panelPointer, { passive: false, capture: true });
     panel.addEventListener("change", onChange);
     panel.addEventListener("focusout", onBlur);
     panel.addEventListener("toggle", (e) => {

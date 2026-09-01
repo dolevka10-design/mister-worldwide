@@ -109,6 +109,41 @@ window.WorldPlannerImport = (() => {
     return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
+  const CITY_SUFFIX = {
+    new: "York",
+    los: "Angeles",
+    san: "Francisco",
+    las: "Vegas",
+    niagara: "Falls",
+    salt: "Lake City",
+    kansas: "City",
+    oklahoma: "City",
+    tel: "Aviv",
+    rio: "de Janeiro",
+    mexico: "City",
+    hong: "Kong",
+    buenos: "Aires",
+  };
+
+  function repairSplitCity(location, place) {
+    let loc = norm(location);
+    let p = norm(place);
+    if (!loc) return { location: loc, place: p };
+
+    const words = loc.split(/\s+/).filter(Boolean);
+    if (words.length === 1) {
+      const key = words[0].toLowerCase();
+      const suffix = CITY_SUFFIX[key];
+      if (suffix && p.toLowerCase().startsWith(suffix.toLowerCase())) {
+        return { location: `${words[0]} ${suffix}`, place: p.slice(suffix.length).trim() };
+      }
+      if (key === "new" && /^york\b/i.test(p)) {
+        return { location: "New York", place: p.replace(/^york\s*/i, "").trim() };
+      }
+    }
+    return { location: loc, place: p };
+  }
+
   function cleanPlaceName(place, { location, time, category } = {}) {
     let p = norm(place);
     if (!p) return "";
@@ -123,13 +158,10 @@ window.WorldPlannerImport = (() => {
 
     if (location && location !== "Other") {
       const loc = location.trim();
-      if (p.toLowerCase().startsWith(loc.toLowerCase())) {
+      if (p.toLowerCase().startsWith(`${loc.toLowerCase()} `)) {
         p = p.slice(loc.length).trim();
-      } else {
-        const tail = loc.split(/\s+/).pop();
-        if (tail && tail.length > 2 && p.toLowerCase().startsWith(tail.toLowerCase())) {
-          p = p.slice(tail.length).trim();
-        }
+      } else if (p.toLowerCase() === loc.toLowerCase()) {
+        p = "";
       }
     }
 
@@ -148,12 +180,13 @@ window.WorldPlannerImport = (() => {
 
   function finalizeActivityFields({ place, location, time, notes, category, url }) {
     let cat = norm(category);
-    let name = cleanPlaceName(place, { location, time, category: cat });
     let note = norm(notes);
     let t = isTimeOnly(time) ? norm(time) : "";
+    const repaired = repairSplitCity(location, place);
+    let name = cleanPlaceName(repaired.place, { location: repaired.location, time: t, category: cat });
 
     if (!name && note && !isCategoryLabel(note)) {
-      name = cleanPlaceName(note, { location, time, category: cat });
+      name = cleanPlaceName(note, { location: repaired.location, time: t, category: cat });
       note = "";
     }
     if (!cat && place && isCategoryLabel(place)) cat = place;
@@ -162,7 +195,7 @@ window.WorldPlannerImport = (() => {
 
     return {
       place: name,
-      location: cleanCity(location) || "Other",
+      location: cleanCity(repaired.location) || "Other",
       time: t,
       notes: note,
       category: cat,
@@ -384,12 +417,17 @@ window.WorldPlannerImport = (() => {
   }
 
   function cellForColumn(cells, col) {
-    return cells
-      .filter((c) => c.x >= col.x0 && c.x < col.x1)
-      .sort((a, b) => a.x - b.x)
-      .map((c) => c.str)
-      .join(" ")
-      .trim();
+    const sorted = [...cells].sort((a, b) => a.x - b.x);
+    const inCol = sorted.filter((c) => c.x >= col.x0 && c.x < col.x1);
+    if (!inCol.length) return "";
+    const parts = inCol.map((c) => c.str);
+    const last = inCol[inCol.length - 1];
+    const next = sorted.find((c) => c.x >= col.x1 && c.x - last.x < 14);
+    if (next && !sorted.some((c) => c.x >= col.x0 && c.x < col.x1 && c !== next && c.str === next.str)) {
+      const gap = next.x - last.x;
+      if (gap < 14 && parts.length < 3) parts.push(next.str);
+    }
+    return parts.join(" ").trim();
   }
 
   function rowFromPdfColumns(cells, columns, fallbackLocation, ctx) {

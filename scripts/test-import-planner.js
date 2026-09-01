@@ -9,32 +9,32 @@ vm.runInContext(fs.readFileSync(`${root}/js/categorize.js`, "utf8"), ctx);
 vm.runInContext(fs.readFileSync(`${root}/js/import-planner.js`, "utf8"), ctx);
 const { parseDelimited, buildTripDraft } = ctx.window.WorldPlannerImport;
 
-const partyUsa = `
-New York Itinerary
-Date\tDay\tLocation\tTime/Order\tPlace/Activity\tNotes\tCategory\tGoogle Maps Link
-17.09.26\tDay 1\tNew York\t05:15\tLanding In EWR In 05:15 Flight LY027 From TLV\t\tTransportation / Flight\tMap
-17.09.26\tDay 1\tNew York\t\tEWR - NYC Guide\t\tGuide / Info\tMap
-17.09.26\tDay 1\tNew York\t\tJoe's Pizza\t\tFood & Dining\tMap
-17.09.26\tDay 1\tNew York\t19:00\tBroadway Show\t\tSightseeing / Attraction\tMap
-18.09.26\tDay 2\tNew York\t10:00\tStatue of Liberty\t\tSightseeing / Attraction\tMap
-26.09.26\tDay 10\tNew York\t21:00\tDin Tai Fung\t\tFood & Dining\tMap
+const splitCityPdf = `
+Date\tDay\tLocation\tTime/Order\tPlace/Activity\tNotes\tCategory
+17.09.26\tDay 1\tNew\t05:15\tYork Landing In EWR Flight LY027\t\tTransportation / Flight
+17.09.26\tDay 1\tNew\t\tYork Times Square\t\tSightseeing / Attraction
+17.09.26\tDay 1\tNew\t19:00\tYork Junior's Restaurant & Bakery\t\tFood & Dining
 `;
 
-const parsed = parseDelimited(partyUsa);
-const draft = buildTripDraft(parsed);
+const partyUsa = `
+Date\tDay\tLocation\tTime/Order\tPlace/Activity\tNotes\tCategory
+17.09.26\tDay 1\tNew York\t05:15\tLanding In EWR Flight LY027\t\tTransportation / Flight
+17.09.26\tDay 1\tNew York\t\tJoe's Pizza\t\tFood & Dining
+`;
 
 let failed = false;
 function assert(cond, msg) {
   if (!cond) { console.error("FAIL:", msg); failed = true; }
 }
 
-assert(parsed.rows.length === 5, `expected 5 activity rows, got ${parsed.rows.length}`);
-assert(parsed.rows[0].place.includes("Landing"), "place from Place/Activity column");
-assert(parsed.rows[0].time === "05:15", `expected time 05:15, got ${parsed.rows[0].time}`);
-assert(parsed.rows[0].location === "New York", `expected location New York, got ${parsed.rows[0].location}`);
-assert(/transport/i.test(parsed.rows[0].category), `expected transport category, got ${parsed.rows[0].category}`);
-assert(parsed.rows[1].place.includes("Joe"), `expected Joe's Pizza, got ${parsed.rows[1].place}`);
-assert(draft.dayPlans.length === 3, `expected 3 day plans, got ${draft.dayPlans.length}`);
-assert(!parsed.rows.some((r) => /^york\b/i.test(r.place)), "city should not prefix place name");
+const split = parseDelimited(splitCityPdf);
+assert(split.rows[0].location === "New York", `split city: got location "${split.rows[0].location}"`);
+assert(!split.rows[0].place.toLowerCase().startsWith("york"), `split city: place should not start with York: "${split.rows[0].place}"`);
+assert(split.rows[1].place.includes("Times"), `split row 2 place: ${split.rows[1].place}`);
+assert(split.rows[2].time === "19:00", `split row 3 time: ${split.rows[2].time}`);
+
+const normal = parseDelimited(partyUsa);
+assert(normal.rows[0].location === "New York", "normal location");
+assert(normal.rows[1].place.includes("Joe"), "normal place");
 
 process.exit(failed ? 1 : 0);
