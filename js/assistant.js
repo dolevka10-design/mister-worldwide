@@ -844,6 +844,23 @@
     }
   }
 
+  function syncAssistViewport() {
+    const panel = $("assist-panel");
+    if (!panel) return;
+    const desktop = window.matchMedia("(min-width: 769px)").matches;
+    if (!panel.classList.contains("open") || desktop) {
+      panel.style.top = "";
+      panel.style.height = "";
+      panel.style.maxHeight = "";
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    panel.style.top = `${Math.max(0, vv.offsetTop)}px`;
+    panel.style.height = `${vv.height}px`;
+    panel.style.maxHeight = `${vv.height}px`;
+  }
+
   function openPanel(open) {
     const panel = $("assist-panel");
     const fab = $("assist-fab");
@@ -851,6 +868,7 @@
     const shouldOpen = open !== false;
     syncUserFromApp();
     panel.classList.toggle("open", shouldOpen);
+    document.body.classList.toggle("assist-open", shouldOpen);
     if (shouldOpen) panel.removeAttribute("hidden");
     else {
       panel.setAttribute("hidden", "");
@@ -858,7 +876,10 @@
     }
     fab?.classList.toggle("open", shouldOpen);
     try { localStorage.setItem("mister-worldwide-assist-open", shouldOpen ? "1" : "0"); } catch { /* */ }
-    if (shouldOpen) $("assist-input")?.focus();
+    syncAssistViewport();
+    if (shouldOpen && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      $("assist-input")?.focus();
+    }
   }
 
   function systemPrompt() {
@@ -2396,6 +2417,10 @@
     });
 
     refreshModelSelect();
+    const onViewport = () => syncAssistViewport();
+    window.visualViewport?.addEventListener("resize", onViewport);
+    window.visualViewport?.addEventListener("scroll", onViewport);
+    window.addEventListener("resize", onViewport);
     try {
       if (localStorage.getItem("mister-worldwide-assist-open") === "1") openPanel(true);
     } catch { /* */ }

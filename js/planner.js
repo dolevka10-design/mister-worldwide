@@ -30,6 +30,7 @@ window.WorldPlanner = (() => {
   let tripListOpen = true;
   let activityDetailCtx = null;
   let pendingDeleteTrip = null;
+  let pendingDeleteItem = null;
   let dragState = null;
 
   let lastActionAt = 0;
@@ -854,6 +855,17 @@ window.WorldPlanner = (() => {
       totalActivities: [...byKey.values()].reduce((s, r) => s + r.count, 0),
       totalPlaces: addedPlaces.length,
       rows: [...byKey.values()].sort((a, b) => b.count - a.count || a.city.localeCompare(b.city)),
+      places: addedPlaces.map((p) => {
+        const country = state.countries.find((c) => c.id === p.countryId);
+        return {
+          name: p.name,
+          city: p.city || "",
+          country: country?.name || "",
+          category: PlaceCategorize.plannerLabel(p.category) || PlaceCategorize.label(p.category) || p.category || "",
+          url: p.url || "",
+          notes: (p.description || "").split("|").map((s) => s.trim()).filter((s) => s && !/^https?:\/\//i.test(s) && s !== (p.city || "") && s !== (country?.name || "")).join(" · "),
+        };
+      }),
     };
     if (!trip.dayListMode) trip.dayListMode = "timeline";
     return trip;
@@ -1188,13 +1200,14 @@ window.WorldPlanner = (() => {
     const href = mapsHref(item, item.importLocation || seg?.city, country?.name);
     const multi = new Set(itemsOf(trip.days?.[dayNum - 1] || {}).map((i) => i.importLocation).filter(Boolean)).size > 1;
     return `<div class="activity-row${item.placeholder ? " is-placeholder" : ""}">
-      ${reorder ? `<button type="button" class="activity-drag-handle" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Hold and drag to reorder"><span></span><span></span><span></span></button>` : ""}
+      ${reorder ? `<button type="button" class="activity-drag-handle" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Drag to reorder"><span></span><span></span><span></span></button>` : ""}
       ${showCategory ? `<span class="activity-row-cat">${categoryIcon(item.category)}</span>` : ""}
       <span class="activity-row-text">${esc(item.name || "—")}${multi && item.importLocation ? `<small class="activity-row-city">${esc(item.importLocation)}</small>` : ""}</span>
       ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
       <span class="activity-row-actions">
         ${href ? `<a class="activity-row-maps" href="${esc(href)}" target="_blank" rel="noopener" aria-label="Open in Maps">Maps</a>` : ""}
         <button type="button" class="activity-row-detail" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Activity details" onclick="WorldPlanner.act(event)">ⓘ</button>
+        <button type="button" class="activity-row-delete" data-act="item-remove" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Delete activity" onclick="WorldPlanner.act(event)">✕</button>
       </span>
     </div>`;
   }
@@ -1256,6 +1269,36 @@ window.WorldPlanner = (() => {
     WorldApp.toast(`Deleted "${name}"`);
   }
 
+  function hideDeleteItemModal() {
+    pendingDeleteItem = null;
+    const modal = $("activity-delete-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function showDeleteItemModal(trip, dayNum, item) {
+    if (!trip || !item) return;
+    pendingDeleteItem = { tripId: trip.id, dayNum, itemId: item.id, name: item.name || "this activity" };
+    const nameEl = $("aidm-name");
+    if (nameEl) nameEl.textContent = `Delete “${item.name || "this activity"}”? This cannot be undone.`;
+    const modal = $("activity-delete-modal");
+    if (modal) modal.hidden = false;
+  }
+
+  function confirmDeleteItem() {
+    if (!pendingDeleteItem) return hideDeleteItemModal();
+    const state = WorldApp.getState();
+    const trip = ensurePlanner(state).trips.find((t) => t.id === pendingDeleteItem.tripId) || getActiveTrip(state);
+    const { dayNum, itemId, name } = pendingDeleteItem;
+    hideDeleteItemModal();
+    if (!trip) return;
+    removeItem(trip, dayNum, itemId);
+    try {
+      WorldApp.persist({ touchPlanner: true, cloud: true, refreshUi: false });
+    } catch { /* */ }
+    render(state);
+    WorldApp.toast(`Deleted "${name}"`);
+  }
+
   function hideImportSummary() {
     const modal = $("import-summary-modal");
     if (modal) modal.hidden = true;
@@ -1264,14 +1307,15 @@ window.WorldPlanner = (() => {
   function showImportSummary(summary) {
     if (!summary) return;
     const list = $("ism-list");
+    const placesEl = $("ism-places");
     const lead = $("ism-lead");
     const countries = [...new Set((summary.rows || []).map((r) => r.country).filter((c) => c && c !== "—"))];
     const countryLabel = countries.length ? countries.join(", ") : "your trip";
     const acts = summary.totalActivities || 0;
-    const places = summary.totalPlaces || 0;
+    const places = summary.places || [];
     if (lead) {
       lead.textContent = `${acts} ${acts === 1 ? "activity" : "activities"} added to ${countryLabel}`
-        + (places ? ` · ${places} new ${places === 1 ? "place" : "places"} on the globe` : "");
+        + (places.length ? ` · ${places.length} new ${places.length === 1 ? "place" : "places"} on the globe` : "");
     }
     if (list) {
       list.innerHTML = (summary.rows || []).length
@@ -1280,6 +1324,27 @@ window.WorldPlanner = (() => {
           return `<li class="import-summary-row"><span>${esc(r.city)} · ${esc(r.country)}</span><strong>${r.count} ${r.count === 1 ? "activity" : "activities"}${extra}</strong></li>`;
         }).join("")
         : '<li class="muted">No locations found</li>';
+    }
+    if (placesEl) {
+      if (!places.length) {
+        placesEl.hidden = true;
+        placesEl.innerHTML = "";
+      } else {
+        placesEl.hidden = false;
+        placesEl.innerHTML = `<h4 class="import-summary-places-title">New places</h4>
+          <ul class="import-summary-places">${places.map((p) => {
+            const meta = [p.city, p.country, p.category].filter(Boolean).join(" · ");
+            const link = p.url && /^https?:\/\//i.test(p.url)
+              ? `<a class="place-link" href="${esc(p.url)}" target="_blank" rel="noopener">Maps</a>`
+              : "";
+            const notes = p.notes ? `<p class="import-summary-place-notes">${esc(p.notes)}</p>` : "";
+            return `<li class="import-summary-place">
+              <strong>${esc(p.name)}</strong>
+              <span class="muted">${esc(meta)}</span>
+              ${notes}${link}
+            </li>`;
+          }).join("")}</ul>`;
+      }
     }
     const modal = $("import-summary-modal");
     if (modal) modal.hidden = false;
@@ -1825,9 +1890,10 @@ window.WorldPlanner = (() => {
     }
     if (act === "item-remove") {
       if (!trip) return;
-      removeItem(trip, Number(actEl.dataset.day), actEl.dataset.item);
-      WorldApp.persist({ touchPlanner: true, cloud: true, refreshUi: false });
-      render(state);
+      const dayNum = Number(actEl.dataset.day);
+      const item = itemsOf(trip.days?.[dayNum - 1]).find((i) => i.id === actEl.dataset.item);
+      if (!item) return;
+      showDeleteItemModal(trip, dayNum, item);
       return;
     }
     if (act === "item-up") {
@@ -2024,8 +2090,8 @@ window.WorldPlanner = (() => {
     }
   }
 
-  const LONG_PRESS_MS = 340;
-  const CANCEL_MOVE_PX = 12;
+  const LONG_PRESS_MS = 70;
+  const CANCEL_MOVE_PX = 14;
 
   function dragWrapFromHandle(handle) {
     return handle.closest(".activity-timeline-row") || handle.closest(".activity-row");
@@ -2090,6 +2156,7 @@ window.WorldPlanner = (() => {
     });
     document.body.appendChild(ghost);
     wrap.classList.add("is-drop-placeholder");
+    try { window.getSelection()?.removeAllRanges(); } catch { /* */ }
     dragState.ghost = ghost;
     dragState.offsetY = last.clientY - rect.top;
     dragState.originLeft = rect.left;
@@ -2151,6 +2218,7 @@ window.WorldPlanner = (() => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    try { window.getSelection()?.removeAllRanges(); } catch { /* */ }
     const wrap = dragWrapFromHandle(handle);
     if (!wrap) return;
     if (dragState) cleanupDrag(false);
@@ -2175,8 +2243,13 @@ window.WorldPlanner = (() => {
     if (!panel || panel._activityDragBound) return;
     panel._activityDragBound = true;
     panel.addEventListener("pointerdown", onActivityDragDown, true);
+    panel.addEventListener("touchstart", (e) => {
+      if (!e.target.closest(".activity-drag-handle")) return;
+      e.preventDefault();
+      try { window.getSelection()?.removeAllRanges(); } catch { /* */ }
+    }, { passive: false, capture: true });
     panel.addEventListener("contextmenu", (e) => {
-      if (e.target.closest(".activity-drag-handle")) e.preventDefault();
+      if (e.target.closest(".activity-drag-handle") || e.target.closest(".activity-row")) e.preventDefault();
     });
   }
 
@@ -2210,6 +2283,11 @@ window.WorldPlanner = (() => {
     $("tdm-confirm")?.addEventListener("click", confirmDeleteTrip);
     $("trip-delete-modal")?.addEventListener("click", (e) => {
       if (e.target.id === "trip-delete-modal") hideDeleteTripModal();
+    });
+    $("aidm-cancel")?.addEventListener("click", hideDeleteItemModal);
+    $("aidm-confirm")?.addEventListener("click", confirmDeleteItem);
+    $("activity-delete-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "activity-delete-modal") hideDeleteItemModal();
     });
     $("ism-ok")?.addEventListener("click", hideImportSummary);
     $("ism-close")?.addEventListener("click", hideImportSummary);

@@ -74,8 +74,8 @@ Correct:
 
 - Sequential day index (`days[0]` = Day 1). PDF “Day 4” is `importDay`, shown as extra text only.
 - Date chips: horizontal scroll (`touch-action: pan-x`). Swipe is not a tap (`touchTrack.moved`).
-- **Categories** vs **Timeline** (`trip.dayListMode`). Timeline = PDF row order, numbered. **Long-press the 3 dotted lines** on the left of a row, then drag up/down (hovering ghost). Drop persists `day.items` (`applyItemOrder`). Same handle in Categories, reordering within that category group.
-- Each row: grip · activity name (+ city if the day has more than one) · time · **Maps** · **ⓘ**. Only ⓘ opens the detail popup (date, city, notes, link).
+- **Categories** vs **Timeline** (`trip.dayListMode`). Timeline = PDF row order, numbered. **Press the 3 dotted lines** on the left (~70ms, not a long iOS press), then drag up/down. Selection/callout is disabled on the row so iOS does not highlight the name.
+- Each row: grip · name · time · **Maps** · **ⓘ** · **✕**. ✕ opens `#activity-delete-modal` (Cancel / Delete). Only ⓘ opens details.
 - **Map this day on globe**: close planner, `WorldGlobe.showDayPlaces`, `WorldApp.showDayPlacesOnCountry` (country panel filtered to that day’s `placeId`s).
 
 ## Delete trip
@@ -94,7 +94,7 @@ Correct:
 - Same **date** (or same day number when a date is missing) across pages → **one day** with **all cities** (`Istanbul · Cappadocia`) and **all rows**, including **empty placeholder** activity rows.
 - Cities such as Istanbul / Cappadocia map to **Turkey** (`locationCountryHint` + `countryIso`). Missing countries are **created** and persisted as `extraCountries`. Maps URLs and planner categories are stored on the place.
 - Accepts `.xlsx`, `.xls`, `.csv`, `.pdf`, **`.zip`** (CSV/PDF/Excel inside).
-- After import, `#import-summary-modal` lists each city · country · activity count, with **OK** and **Close**.
+- After import, `#import-summary-modal` lists city · country · counts, then **each new globe place** (name, city, country, category, notes, Maps), with **OK** and **Close**.
 
 Tests: `node scripts/test-import-planner.js`
 

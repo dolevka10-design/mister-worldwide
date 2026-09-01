@@ -129,17 +129,17 @@
     <button type="button" class="assist-fab" id="assist-fab" aria-label="Open AI assistant">✦</button>
     <section class="assist-panel" id="assist-panel" hidden>
       <header class="assist-head">
-        <div>
+        <button type="button" class="btn btn-ghost btn-sm assist-close" id="assist-close" aria-label="Close assistant">←</button>
+        <div class="assist-head-title">
           <strong>Travel AI</strong>
-          <p class="muted assist-sub" id="assist-sub">Persistent chat · places · trips · itineraries</p>
+          <p class="muted assist-sub" id="assist-sub">Places · trips · itineraries</p>
         </div>
-        <div class="assist-head-actions">
-          <button type="button" class="btn btn-ghost btn-sm" id="assist-undo">Undo</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="assist-key">Key</button>
-          <select id="assist-model" class="pill-select assist-model"></select>
-          <button type="button" class="btn btn-ghost btn-sm" id="assist-close">✕</button>
-        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="assist-undo">Undo</button>
       </header>
+      <div class="assist-toolbar">
+        <select id="assist-model" class="pill-select assist-model" aria-label="AI model"></select>
+        <button type="button" class="btn btn-ghost btn-sm" id="assist-key">Key</button>
+      </div>
       <div id="assist-key-form" class="assist-key-form" hidden>
         <label class="field"><span>Provider</span>
           <select id="assist-key-provider" class="pill-select">
@@ -158,8 +158,8 @@
       </div>
       <div class="assist-log" id="assist-log"></div>
       <form class="assist-form" id="assist-form">
-        <input id="assist-input" type="text" placeholder="Add a museum in Tokyo, import CSV, list restaurants in Paris…" autocomplete="off" />
-        <button type="submit" class="btn btn-primary">Send</button>
+        <input id="assist-input" type="text" placeholder="Ask or add a place…" autocomplete="off" enterkeyhint="send" />
+        <button type="submit" class="btn btn-primary assist-send">Send</button>
       </form>
     </section>
 
@@ -187,11 +187,23 @@
       </div>
     </div>
 
+    <div id="activity-delete-modal" class="modal-overlay" hidden>
+      <div class="modal card" role="dialog" aria-labelledby="aidm-title">
+        <h3 id="aidm-title">Delete activity</h3>
+        <p class="muted" id="aidm-name">Delete this activity?</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="aidm-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="aidm-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <div id="import-summary-modal" class="modal-overlay" hidden>
       <div class="modal card import-summary-modal" role="dialog" aria-labelledby="ism-title">
         <h3 id="ism-title">Locations added</h3>
         <p class="muted" id="ism-lead"></p>
         <ul class="import-summary-list" id="ism-list"></ul>
+        <div id="ism-places" class="import-summary-places-wrap" hidden></div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="ism-close">Close</button>
           <button type="button" class="btn btn-primary" id="ism-ok">OK</button>
