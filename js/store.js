@@ -213,6 +213,21 @@ window.WorldStore = (() => {
     };
   }
 
+  function mergePlannerKeepNav(local, remote) {
+    const merged = mergePlanner(local, remote);
+    try {
+      const raw = sessionStorage.getItem("plannerNav");
+      if (!raw) return merged;
+      const nav = JSON.parse(raw);
+      if (nav.view === "trip" && nav.tripId && merged.trips.some((t) => t.id === nav.tripId)) {
+        merged.view = "trip";
+        merged.activeTripId = nav.tripId;
+        merged.activeDayNum = nav.dayNum || 1;
+      }
+    } catch { /* */ }
+    return merged;
+  }
+
   function packCloudPayload(state) {
     return {
       countries: state.countries,
@@ -343,6 +358,6 @@ window.WorldStore = (() => {
     loadSeed, loadState, saveState, defaultState, setUserEmail, uid,
     nextPlaceId, recalcCountry, reconcileState, recategorizePlaces, countriesForUi, placesByCountry, groupByCity, groupByCategory,
     exportCountryCsv, importCsvPlaces,
-    emptyPlanner, touchPlanner, mergePlanner, packCloudPayload, hasCloudData,
+    emptyPlanner, touchPlanner, mergePlanner, mergePlannerKeepNav, packCloudPayload, hasCloudData,
   };
 })();

@@ -331,17 +331,9 @@ window.WorldPlannerImport = (() => {
     return normalizeRow(raw, fallbackLocation, ctx);
   }
 
-  async function parsePdf(file) {
-    if (typeof pdfjsLib === "undefined") throw new Error("PDF library not loaded");
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    const rows = [];
-    const guides = [];
+  async function extractPdfLines(pdf) {
+    const allLines = [];
     let title = "";
-    let columns = null;
-    let fallbackLocation = "";
-    let ctx = { date: null, day: null, location: "" };
-
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
@@ -352,32 +344,111 @@ window.WorldPlannerImport = (() => {
         const x = it.transform?.[4] ?? 0;
         const y = Math.round((it.transform?.[5] ?? 0) / 2) * 2;
         let row = buckets.find((b) => Math.abs(b.y - y) < 4);
-        if (!row) {
-          row = { y, cells: [] };
-          buckets.push(row);
-        }
+        if (!row) { row = { y, cells: [] }; buckets.push(row); }
         row.cells.push({ x, str });
       }
       buckets.sort((a, b) => b.y - a.y);
-
       for (const row of buckets) {
         row.cells.sort((a, b) => a.x - b.x);
         const line = row.cells.map((c) => c.str).join(" ");
         if (/trip planner/i.test(line) && !title) title = line.replace(/total days.*/i, "").trim();
-        if (/itinerary/i.test(line) && row.cells.length <= 3) {
+        allLines.push({ cells: row.cells, tab: row.cells.map((c) => c.str).join("\t"), line });
+      }
+    }
+    return { allLines, title };
+  }
+
+  function clusterCellsToColumns(cells) {
+    if (!cells?.length) return null;
+    const sorted = [...cells].sort((a, b) => a.x - b.x);
+    const gaps = [];
+    for (let i = 1; i < sorted.length; i++) gaps.push({ i, gap: sorted[i].x - sorted[i - 1].x });
+    gaps.sort((a, b) => b.gap - a.gap);
+    const splitAt = gaps.filter((g) => g.gap > 18).map((g) => g.i).sort((a, b) => a - b);
+    if (!splitAt.length && sorted.length < 4) return null;
+    const keys = ["date", "day", "location", "time", "place", "notes", "category", "url"];
+    const parts = [];
+    let start = 0;
+    for (const idx of splitAt) {
+      parts.push(sorted.slice(start, idx).map((c) => c.str).join(" ").trim());
+      start = idx;
+    }
+    parts.push(sorted.slice(start).map((c) => c.str).join(" ").trim());
+    if (parts.length < 4) return null;
+    const raw = {};
+    keys.forEach((k, i) => { raw[k] = parts[i] || ""; });
+    return raw;
+  }
+
+  function parsePdfCellRows(allLines, fallbackLocation, ctxIn = {}) {
+    const rows = [];
+    const guides = [];
+    const ctx = { ...ctxIn };
+    let location = fallbackLocation || ctx.location || "";
+    for (const { cells, line } of allLines) {
+      if (/itinerary/i.test(line) && cells.length <= 3) {
+        location = line.replace(/itinerary/i, "").trim() || location;
+        ctx.location = location;
+        continue;
+      }
+      if (looksLikeHeader(cells.map((c) => c.str))) continue;
+      const raw = clusterCellsToColumns(cells);
+      if (!raw) continue;
+      const row = normalizeRow(raw, location, ctx);
+      if (!row) continue;
+      if (row.type === "guide") {
+        guides.push({ title: row.title, body: row.body, city: row.city || location });
+        continue;
+      }
+      if (row.date) ctx.date = row.date;
+      if (row.day) ctx.day = row.day;
+      if (row.location) { location = row.location; ctx.location = row.location; }
+      rows.push(row);
+    }
+    return { rows, guides };
+  }
+
+  function pickBestParse(candidates) {
+    const scored = candidates
+      .filter((c) => c && (c.rows?.length || 0) > 0)
+      .map((c) => ({
+        ...c,
+        score: (c.rows?.length || 0) * 10
+          + (c.rows?.filter((r) => r.date).length || 0) * 5
+          + (c.rows?.filter((r) => r.url).length || 0) * 2,
+      }))
+      .sort((a, b) => b.score - a.score);
+    return scored[0] || { rows: [], guides: [], title: "" };
+  }
+
+  async function parsePdf(file) {
+    if (typeof pdfjsLib === "undefined") throw new Error("PDF library not loaded");
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const { allLines, title: pdfTitle } = await extractPdfLines(pdf);
+    const tabText = allLines.map((l) => l.tab).join("\n");
+    const candidates = [];
+
+    // Strategy 1: column header detection on y-bucketed rows
+    {
+      const rows = [];
+      const guides = [];
+      let columns = null;
+      let fallbackLocation = "";
+      let ctx = { date: null, day: null, location: "" };
+      let title = pdfTitle;
+      for (const { cells, line } of allLines) {
+        if (/itinerary/i.test(line) && cells.length <= 3) {
           fallbackLocation = line.replace(/itinerary/i, "").trim() || fallbackLocation;
           ctx.location = fallbackLocation;
           continue;
         }
         if (!columns) {
-          const detected = detectColumns(row.cells);
-          if (detected) {
-            columns = detected;
-            continue;
-          }
+          const detected = detectColumns(cells);
+          if (detected) { columns = detected; continue; }
         }
         if (columns) {
-          const parsed = rowFromPdfColumns(row.cells, columns, fallbackLocation, ctx);
+          const parsed = rowFromPdfColumns(cells, columns, fallbackLocation, ctx);
           if (!parsed) continue;
           if (parsed.type === "guide") {
             guides.push({ title: parsed.title, body: parsed.body, city: parsed.city || fallbackLocation });
@@ -387,39 +458,30 @@ window.WorldPlannerImport = (() => {
           if (parsed.day) ctx.day = parsed.day;
           if (parsed.location) { fallbackLocation = parsed.location; ctx.location = parsed.location; }
           rows.push(parsed);
-          continue;
         }
       }
+      candidates.push({ rows, guides, title: title || pdfTitle });
     }
 
-    if (!rows.length) {
-      const allLines = [];
-      for (let p = 1; p <= pdf.numPages; p++) {
-        const page = await pdf.getPage(p);
-        const content = await page.getTextContent();
-        const buckets = [];
-        for (const it of content.items || []) {
-          const str = norm(it.str);
-          if (!str) continue;
-          const x = it.transform?.[4] ?? 0;
-          const y = Math.round((it.transform?.[5] ?? 0) / 3) * 3;
-          let row = buckets.find((b) => Math.abs(b.y - y) < 5);
-          if (!row) { row = { y, cells: [] }; buckets.push(row); }
-          row.cells.push({ x, str });
-        }
-        buckets.sort((a, b) => b.y - a.y);
-        for (const row of buckets) {
-          row.cells.sort((a, b) => a.x - b.x);
-          allLines.push(row.cells.map((c) => c.str).join("\t"));
-        }
-      }
-      const delimited = parseDelimited(allLines.join("\n"));
-      if (delimited.rows.length) return delimited;
-      const loose = parsePdfLoose(allLines.join("\n"));
-      return { rows: loose.rows, guides: [...guides, ...loose.guides], title: title || loose.title };
-    }
+    // Strategy 2: tab-delimited from x positions
+    candidates.push({ ...parseDelimited(tabText), title: pdfTitle });
 
-    return { rows, guides, title: title || "Imported trip" };
+    // Strategy 3: gap-clustered cells per row
+    candidates.push({ ...parsePdfCellRows(allLines, "", {}), title: pdfTitle });
+
+    // Strategy 4: loose line regex
+    const loose = parsePdfLoose(tabText);
+    candidates.push({ rows: loose.rows, guides: loose.guides, title: loose.title || pdfTitle });
+
+    const best = pickBestParse(candidates);
+    if (!best.rows?.length) {
+      throw new Error("No itinerary rows found. Export your planner as Excel/CSV, or use columns: Date, Day, Location, Time, Place/Activity, Notes, Category, Maps URL");
+    }
+    return {
+      rows: best.rows,
+      guides: best.guides || [],
+      title: (best.title || pdfTitle || "Imported trip").replace(/\s*total\s*days.*/i, "").trim() || "Imported trip",
+    };
   }
 
   function parsePdfLoose(text) {

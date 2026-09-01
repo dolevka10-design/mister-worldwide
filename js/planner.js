@@ -29,7 +29,33 @@ window.WorldPlanner = (() => {
   let routeEditorOpen = false;
   let tripListOpen = true;
 
-  function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
+  let lastActionAt = 0;
+  let lastActionKey = "";
+
+  function handleAction(actEl, e) {
+    if (!actEl?.dataset?.act) return;
+    const key = `${actEl.dataset.act}:${actEl.dataset.tripId || ""}:${actEl.dataset.day || ""}`;
+    const now = Date.now();
+    if (key === lastActionKey && now - lastActionAt < 450) return;
+    lastActionAt = now;
+    lastActionKey = key;
+    if (e?.preventDefault) e.preventDefault();
+    if (e?.stopPropagation) e.stopPropagation();
+    onClick({ target: actEl, preventDefault: () => {}, stopPropagation: () => {} }, actEl);
+  }
+
+  function wirePlannerActions() {
+    const panel = $("planner-panel");
+    if (!panel) return;
+    panel.querySelectorAll("[data-act]").forEach((el) => {
+      el.onclick = (e) => handleAction(el, e);
+    });
+  }
+
+  function act(e) {
+    const el = e?.currentTarget || e?.target?.closest?.("[data-act]");
+    if (el) handleAction(el, e);
+  }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
   function slotOptions(selected) {
     return SLOTS.map((s) => `<option value="${s.id}" ${s.id === selected ? "selected" : ""}>${s.label}</option>`).join("");
@@ -1133,6 +1159,7 @@ window.WorldPlanner = (() => {
     const state = stateIn || WorldApp.getState();
     const panel = $("planner-panel");
     if (!panel) return;
+    restorePlannerNav(state);
     ensurePlanner(state);
     syncUiFromState(state);
     const body = panel.querySelector(".planner-body");
@@ -1164,6 +1191,7 @@ window.WorldPlanner = (() => {
       const b = panel.querySelector(".planner-body");
       if (b && lastScroll) b.scrollTop = lastScroll;
     });
+    wirePlannerActions();
     return state;
   }
 
@@ -1201,25 +1229,27 @@ window.WorldPlanner = (() => {
       panel.classList.add("open");
       panel.hidden = false;
     }
+    try {
+      sessionStorage.setItem("plannerNav", JSON.stringify({ view: "trip", tripId, dayNum: n }));
+    } catch { /* */ }
     WorldStore.saveState(state);
-    WorldApp.persist({ touchPlanner: true });
     render(state);
-    requestAnimationFrame(() => {
-      scrollPlannerToDay();
-      if (flush && WorldCloud?.configured) {
-        WorldApp.persistPlanner({ flush: true, skipPlannerRender: true }).catch(() => {});
-      }
-      if (msg) WorldApp.toast(msg);
-    });
+    scrollPlannerToDay();
+    WorldApp.persist({ touchPlanner: true });
+    if (flush && WorldCloud?.configured) {
+      WorldApp.persistPlanner({ flush: true, skipPlannerRender: true }).catch(() => {});
+    }
+    if (msg) WorldApp.toast(msg);
     return trip;
   }
 
   function finishCreateTrip(state, created) {
-    enterTripView(state, created.id, { dayNum: 1, flush: true, toast: "Trip created & synced" });
+    if (!created?.id) return WorldApp.toast("Could not create trip", "error");
+    enterTripView(state, created.id, { dayNum: 1, flush: true, toast: "Trip created" });
   }
 
-  function onClick(e) {
-    const actEl = e.target.closest("[data-act]");
+  function onClick(e, actElIn) {
+    const actEl = actElIn || e.target.closest("[data-act]");
     if (!actEl) return;
     const act = actEl.dataset.act;
     const state = WorldApp.getState();
@@ -1311,12 +1341,17 @@ window.WorldPlanner = (() => {
     if (act === "create-trip") {
       e.preventDefault();
       e.stopPropagation();
-      const segments = collectCreateRows();
-      const name = $("new-trip-name")?.value?.trim() || "My trip";
-      if (!segments.length) return WorldApp.toast("Pick at least one country", "warn");
-      const created = createTrip(state, { name, segments });
-      WorldStore.saveState(state);
-      finishCreateTrip(state, created);
+      try {
+        const segments = collectCreateRows();
+        const name = $("new-trip-name")?.value?.trim() || "My trip";
+        if (!segments.length) return WorldApp.toast("Pick at least one country", "warn");
+        const created = createTrip(state, { name, segments });
+        if (!created) return WorldApp.toast("Could not create trip", "error");
+        WorldStore.saveState(state);
+        finishCreateTrip(state, created);
+      } catch (err) {
+        WorldApp.toast(err?.message || "Create failed", "error");
+      }
       return;
     }
     if (act === "day-map") {
@@ -1496,10 +1531,12 @@ window.WorldPlanner = (() => {
       const draft = WorldPlannerImport.buildTripDraft(parsed);
       const state = WorldApp.getState();
       const trip = await importDraft(state, draft);
-      enterTripView(state, trip.id, { dayNum: 1, flush: true, toast: `Imported ${draft.rowCount} activities & synced` });
+      WorldStore.saveState(state);
+      enterTripView(state, trip.id, { dayNum: 1, flush: true, toast: `Imported ${draft.rowCount} activities` });
       return trip;
     } catch (err) {
-      WorldApp.toast(err.message || "Import failed", "error");
+      console.warn("Import failed", err);
+      WorldApp.toast(err.message || "Import failed — try Excel/CSV export from your planner", "error");
     }
   }
 
@@ -1570,6 +1607,18 @@ window.WorldPlanner = (() => {
     enterTripView(state, trip.id, { dayNum, flush: true, toast: `Added to day ${dayNum}` });
   }
 
+  function restorePlannerNav(state) {
+    try {
+      const raw = sessionStorage.getItem("plannerNav");
+      if (!raw) return;
+      const nav = JSON.parse(raw);
+      const p = ensurePlanner(state);
+      if (nav.view === "trip" && nav.tripId && p.trips.some((t) => t.id === nav.tripId)) {
+        setPlannerView(state, "trip", nav.tripId, nav.dayNum || 1);
+      }
+    } catch { /* */ }
+  }
+
   function toggle(on) {
     open = on != null ? !!on : !open;
     const panel = $("planner-panel");
@@ -1579,8 +1628,9 @@ window.WorldPlanner = (() => {
     if (open) {
       const st = WorldApp.getState();
       const planner = ensurePlanner(st);
+      restorePlannerNav(st);
       const trip = getActiveTrip(st);
-      if (!planner.view) {
+      if (!planner.view || (planner.view === "trip" && !trip)) {
         if (trip) setPlannerView(st, "trip", trip.id, trip.activeDayNum || 1);
         else if (!planner.trips.length) setPlannerView(st, "create", null);
         else setPlannerView(st, "list", null);
@@ -1590,23 +1640,12 @@ window.WorldPlanner = (() => {
     }
   }
 
-  function onPanelClick(e) {
-    const panel = $("planner-panel");
-    if (!panel || panel.hidden || !panel.contains(e.target)) return;
-    const actEl = e.target.closest("[data-act]");
-    if (!actEl || actEl.disabled) return;
-    if (e.target.closest("input, textarea, select, option") && !actEl.contains(e.target)) return;
-    if (e.target.closest("a.place-link, summary")) return;
-    onClick(e);
-  }
-
   function init() {
     if (bound) return;
     const panel = $("planner-panel");
     if (!panel) return;
     bound = true;
     $("btn-planner")?.addEventListener("click", () => toggle(true));
-    panel.addEventListener("click", onPanelClick);
     panel.addEventListener("change", onChange);
     panel.addEventListener("focusout", onBlur);
     panel.addEventListener("toggle", (e) => {
@@ -1625,7 +1664,7 @@ window.WorldPlanner = (() => {
   }
 
   return {
-    init, toggle, open: () => toggle(true), render, isOpen: () => open, SLOTS, slotLabel,
+    init, toggle, open: () => toggle(true), render, isOpen: () => open, act, SLOTS, slotLabel,
     ensurePlanner, migrateTrip, createTrip, getActiveTrip, addPlace, removeEntry,
     addSegment, updateSegment, removeSegment, moveSegment, moveDay, removeDay, moveEntry,
     segmentForDay, placesForDay, localSuggestDay, aiSuggestDay,

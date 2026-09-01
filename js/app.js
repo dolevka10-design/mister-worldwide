@@ -399,7 +399,7 @@ window.WorldApp = (() => {
       countries.set(c.id, prev ? { ...prev, ...c } : { ...c });
     }
 
-    const mergedPlanner = WorldStore.mergePlanner(local?.planner, remote?.planner);
+    const mergedPlanner = WorldStore.mergePlannerKeepNav(local?.planner, remote?.planner);
     const plannerUpdatedAt = mergedPlanner.updatedAt
       || remote?.plannerUpdatedAt
       || local?.plannerUpdatedAt
