@@ -75,7 +75,7 @@ Correct:
 - Sequential day index (`days[0]` = Day 1). PDF “Day 4” is `importDay`, shown as extra text only.
 - Date chips: horizontal scroll (`touch-action: pan-x`). Swipe is not a tap (`touchTrack.moved`).
 - **Categories** vs **Timeline** (`trip.dayListMode`). Timeline = PDF row order, numbered. **Press the 3 dotted lines** on the left (~70ms, not a long iOS press), then drag up/down. Selection/callout is disabled on the row so iOS does not highlight the name.
-- Each row: grip · name · time · **Maps** · **ⓘ** · **✕**. ✕ opens `#activity-delete-modal` (Cancel / Delete). Only ⓘ opens details.
+- Each row: grip · name · time · **Maps** · **ⓘ** · **✕**. A short tap on the name rectangle **copies the activity name**. ✕ opens `#activity-delete-modal` (Cancel / Delete). Only ⓘ opens details.
 - **Map this day on globe**: close planner, `WorldGlobe.showDayPlaces`, `WorldApp.showDayPlacesOnCountry` (country panel filtered to that day’s `placeId`s).
 
 ## Delete trip

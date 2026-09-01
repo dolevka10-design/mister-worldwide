@@ -1173,6 +1173,30 @@ input[type="date"]::-webkit-date-and-time-value {
   color: var(--muted);
   text-align: center;
 }
+.activity-row-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.1rem 0.15rem;
+  min-height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.activity-row-copy:active {
+  background: rgba(124, 240, 255, 0.08);
+}
 .activity-row-text {
   flex: 1;
   min-width: 0;

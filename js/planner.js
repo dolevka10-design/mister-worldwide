@@ -63,7 +63,7 @@ window.WorldPlanner = (() => {
     if (!panel.contains(e.target)) return;
 
     if (e.type === "touchstart") {
-      const scrollEl = e.target.closest(".day-nav-chips, .planner-trip-chips");
+      const scrollEl = e.target.closest(".day-nav-chips, .planner-trip-chips, .activity-row-copy");
       if (scrollEl && e.touches?.[0]) {
         touchTrack = {
           el: scrollEl,
@@ -114,6 +114,37 @@ window.WorldPlanner = (() => {
     if (el) handleAction(el, e);
   }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+  function copyActivityName(raw) {
+    const text = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!text || text === "—") return WorldApp.toast("Nothing to copy", "warn");
+    const done = () => WorldApp.toast(`Copied “${text}”`);
+    const fail = () => WorldApp.toast("Could not copy", "error");
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => {
+        if (fallbackCopy(text)) done();
+        else fail();
+      });
+      return;
+    }
+    if (fallbackCopy(text)) done();
+    else fail();
+  }
   function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
   function slotOptions(selected) {
     return SLOTS.map((s) => `<option value="${s.id}" ${s.id === selected ? "selected" : ""}>${s.label}</option>`).join("");
@@ -1201,9 +1232,11 @@ window.WorldPlanner = (() => {
     const multi = new Set(itemsOf(trip.days?.[dayNum - 1] || {}).map((i) => i.importLocation).filter(Boolean)).size > 1;
     return `<div class="activity-row${item.placeholder ? " is-placeholder" : ""}">
       ${reorder ? `<button type="button" class="activity-drag-handle" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Drag to reorder"><span></span><span></span><span></span></button>` : ""}
-      ${showCategory ? `<span class="activity-row-cat">${categoryIcon(item.category)}</span>` : ""}
-      <span class="activity-row-text">${esc(item.name || "—")}${multi && item.importLocation ? `<small class="activity-row-city">${esc(item.importLocation)}</small>` : ""}</span>
-      ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
+      <button type="button" class="activity-row-copy" data-act="copy-activity" data-name="${esc(item.name || "")}" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Copy ${esc(item.name || "activity")} name" onclick="WorldPlanner.act(event)">
+        ${showCategory ? `<span class="activity-row-cat">${categoryIcon(item.category)}</span>` : ""}
+        <span class="activity-row-text">${esc(item.name || "—")}${multi && item.importLocation ? `<small class="activity-row-city">${esc(item.importLocation)}</small>` : ""}</span>
+        ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
+      </button>
       <span class="activity-row-actions">
         ${href ? `<a class="activity-row-maps" href="${esc(href)}" target="_blank" rel="noopener" aria-label="Open in Maps">Maps</a>` : ""}
         <button type="button" class="activity-row-detail" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Activity details" onclick="WorldPlanner.act(event)">ⓘ</button>
@@ -1695,6 +1728,10 @@ window.WorldPlanner = (() => {
     const actEl = actElIn || e.target.closest("[data-act]");
     if (!actEl) return;
     const act = actEl.dataset.act;
+    if (act === "copy-activity") {
+      copyActivityName(actEl.dataset.name);
+      return;
+    }
     const state = WorldApp.getState();
     ensurePlanner(state);
     const trip = getActiveTrip(state);

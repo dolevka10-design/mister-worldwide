@@ -14,7 +14,7 @@ Interactive **3D travel globe** with Google Maps saved places, fine-grained cate
 - **Travel Planner**
   - Trip list (open / delete with confirm) and inner day page (← Trips, delete trip)
   - Each day: **Categories** or **Timeline** (PDF order; press the 3 dotted lines to drag-reorder)
-  - Activity rows: left grip, name, **Maps**, **ⓘ**, and **✕** (delete with confirm)
+  - Activity rows: left grip, tap name to copy, **Maps**, **ⓘ**, and **✕** (delete with confirm)
   - **Map this day on globe** — globe pins + country panel of that day’s places
 - **Import itinerary** — Excel / PDF / CSV / ZIP; after import, a popup lists locations and **each new place** (city, country, category, link)
 - **Import places** — Google Takeout ZIP, My Maps CSV, or Maps URLs (`Name | City | Country | URL`)
@@ -58,7 +58,7 @@ node scripts/import-takeout.js path/to/takeout.zip
    - **← Trips** returns to the list (does not close Planner)
    - **Delete** in the trip header (same confirm popup)
    - Day chips scroll horizontally; dropdown + arrows change day
-   - **Timeline**: numbered PDF order; press the **3 dotted lines** on the left, then drag to reorder; **Maps** + **ⓘ** + **✕** (delete confirm) on each row
+   - **Timeline**: numbered PDF order; press the **3 dotted lines** to drag; **tap the name** to copy it; **Maps** + **ⓘ** + **✕** (delete confirm) on each row
    - **Categories**: grouped by type; same grip + Maps + ⓘ + delete
    - **Map this day on globe** closes Planner and shows that day’s places
 4. **+ Trip** on any saved place in a country page
