@@ -1,5 +1,6 @@
 /**
- * Firebase Auth (allowlist) + Firestore sync for Mister Worldwide.
+ * Firebase Auth (allowlist) + compact Firestore sync for Mister Worldwide.
+ * Cloud docs store planner + user place deltas only (never the 2.5MB seed dump).
  */
 window.WorldCloud = (() => {
   const cfg = window.FIREBASE_CONFIG;
@@ -7,7 +8,14 @@ window.WorldCloud = (() => {
     cfg?.apiKey && !String(cfg.apiKey).startsWith("PASTE_") &&
     cfg?.projectId && !String(cfg.projectId).startsWith("PASTE_");
 
+  const SAVE_DEBOUNCE_MS = 2500;
+  const QUOTA_PAUSE_MS = 15 * 60 * 1000;
+
   let auth = null, db = null, saveTimer = null, unsubDoc = null, applyingRemote = false;
+  let quotaPausedUntil = 0;
+  let lastAckedGen = 0;
+  let lastToastAt = 0;
+  let inFlight = null;
 
   function normalizeEmail(email) {
     return String(email || "").trim().toLowerCase();
@@ -84,6 +92,30 @@ window.WorldCloud = (() => {
     });
   }
 
+  function isQuotaError(e) {
+    const msg = String(e?.message || e?.code || "").toLowerCase();
+    return /quota|resource.exhausted|limit exceeded|exceeds|too (large|big)|invalid-argument/.test(msg)
+      || e?.code === "resource-exhausted";
+  }
+
+  function isQuotaPaused() {
+    return Date.now() < quotaPausedUntil;
+  }
+
+  function pauseQuota(e) {
+    quotaPausedUntil = Date.now() + QUOTA_PAUSE_MS;
+    const now = Date.now();
+    if (now - lastToastAt > 20000) {
+      lastToastAt = now;
+      WorldApp?.toast?.("Cloud sync paused. Trips still save on this device.", "warn");
+    }
+    console.warn("Cloud quota/size — paused", e);
+  }
+
+  function compactPayload(state) {
+    return WorldStore.packCloudPayload(state);
+  }
+
   async function loadFromCloud(uid) {
     if (!db || !uid) return null;
     try {
@@ -91,26 +123,41 @@ window.WorldCloud = (() => {
       return snap.exists ? snap.data() : null;
     } catch (e) {
       console.warn("Cloud load failed", e);
-      if (isQuotaError(e)) WorldApp?.toast?.("Cloud sync paused (quota). Using data on this device.", "warn");
+      if (isQuotaError(e)) pauseQuota(e);
       return null;
     }
   }
 
-  function isQuotaError(e) {
-    const msg = String(e?.message || e?.code || "").toLowerCase();
-    return /quota|resource.exhausted|limit exceeded/.test(msg);
+  async function writeDoc(uid, state) {
+    if (!db || !uid || applyingRemote) return { ok: false, skipped: true };
+    if (isQuotaPaused()) return { ok: false, paused: true };
+    const gen = ++lastWriteGen;
+    const payload = {
+      ...compactPayload(state),
+      writeGen: gen,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    try {
+      await db.doc(docPath(uid)).set(payload, { merge: false });
+      lastAckedGen = gen;
+      return { ok: true, gen };
+    } catch (e) {
+      if (isQuotaError(e)) {
+        pauseQuota(e);
+        return { ok: false, error: e, quota: true };
+      }
+      console.warn("Cloud save failed", e);
+      WorldApp?.toast?.("Cloud save failed — kept on this device.", "warn");
+      return { ok: false, error: e };
+    }
   }
 
-  function scheduleSave(uid, state, delay = 500) {
-    if (!db || !uid || applyingRemote) return;
+  function scheduleSave(uid, state, delay = SAVE_DEBOUNCE_MS) {
+    if (!db || !uid || applyingRemote || isQuotaPaused()) return;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      try {
-        await db.doc(docPath(uid)).set({ ...state, savedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-      } catch (e) {
-        console.warn("Cloud save failed", e);
-        if (isQuotaError(e)) WorldApp?.toast?.("Cloud sync paused (quota). Changes still save on this device.", "warn");
-      }
+    saveTimer = setTimeout(() => {
+      const latest = window.WorldApp?.getState?.() || state;
+      inFlight = writeDoc(uid, latest).finally(() => { inFlight = null; });
     }, delay);
   }
 
@@ -120,12 +167,14 @@ window.WorldCloud = (() => {
     unsubDoc = db.doc(docPath(uid)).onSnapshot(
       (snap) => {
         if (!snap.exists) return;
+        const remote = snap.data();
+        if (remote?.writeGen && remote.writeGen === lastAckedGen) return;
         applyingRemote = true;
-        try { onData(snap.data()); } finally { applyingRemote = false; }
+        try { onData(remote); } finally { applyingRemote = false; }
       },
       (e) => {
         console.warn("Cloud listen failed", e);
-        if (isQuotaError(e)) WorldApp?.toast?.("Cloud sync paused (quota). Trips still work on this device.", "warn");
+        if (isQuotaError(e)) pauseQuota(e);
       }
     );
     return () => { if (unsubDoc) unsubDoc(); unsubDoc = null; };
@@ -134,31 +183,38 @@ window.WorldCloud = (() => {
   function isApplyingRemote() { return applyingRemote; }
 
   async function saveAssistantChat(uid, payload) {
-    if (!db || !uid) return;
-    await db.doc(`assistantChats/${uid}`).set(payload, { merge: true });
+    if (!db || !uid || isQuotaPaused()) return;
+    try {
+      await db.doc(`assistantChats/${uid}`).set(payload, { merge: true });
+    } catch (e) {
+      if (isQuotaError(e)) pauseQuota(e);
+      else console.warn("Assistant chat save failed", e);
+    }
   }
 
   async function loadAssistantChat(uid) {
     if (!db || !uid) return null;
-    const snap = await db.doc(`assistantChats/${uid}`).get();
-    return snap.exists ? snap.data() : null;
+    try {
+      const snap = await db.doc(`assistantChats/${uid}`).get();
+      return snap.exists ? snap.data() : null;
+    } catch (e) {
+      console.warn("Assistant chat load failed", e);
+      return null;
+    }
   }
 
   function flushSave(uid, state) {
     if (!db || !uid) return Promise.resolve({ ok: false, skipped: true });
     clearTimeout(saveTimer);
-    return db.doc(docPath(uid)).set(
-      { ...state, savedAt: firebase.firestore.FieldValue.serverTimestamp() },
-      { merge: true }
-    ).then(() => ({ ok: true })).catch((e) => {
-      console.warn("Cloud save failed", e);
-      if (isQuotaError(e)) WorldApp?.toast?.("Cloud sync paused (quota). Changes still save on this device.", "warn");
-      return { ok: false, error: e };
-    });
+    return writeDoc(uid, state);
+  }
+
+  function resumeQuota() {
+    quotaPausedUntil = 0;
   }
 
   return {
-    configured, initFirebase, isAllowedEmail, isQuotaError,
+    configured, initFirebase, isAllowedEmail, isQuotaError, isQuotaPaused, resumeQuota,
     signIn, signUp, signInWithGoogle, signOut, onAuthStateChanged,
     loadFromCloud, scheduleSave, flushSave, listenCloud, isApplyingRemote,
     saveAssistantChat, loadAssistantChat,

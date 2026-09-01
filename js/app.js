@@ -28,22 +28,40 @@ window.WorldApp = (() => {
     el._t = setTimeout(() => el.classList.remove("show"), type === "error" ? 4200 : 2800);
   }
 
-  function persist({ touchPlanner } = {}) {
+  function persist(opts = {}) {
+    const {
+      touchPlanner = false,
+      cloud = true,
+      refreshUi = true,
+    } = opts;
     if (touchPlanner) WorldStore.touchPlanner(state);
-    WorldStore.saveState(state);
-    if (user?.uid && WorldCloud.configured) {
-      WorldCloud.scheduleSave(user.uid, WorldStore.packCloudPayload(state));
+    try {
+      WorldStore.saveState(state);
+    } catch (e) {
+      console.warn("Local persist failed", e);
     }
-    WorldGlobe.updatePins(countriesForUi(state));
-    renderCountryPanel();
-    renderStats();
+    if (cloud && user?.uid && WorldCloud.configured && !WorldCloud.isApplyingRemote?.()) {
+      WorldCloud.scheduleSave(user.uid, state);
+    }
+    if (refreshUi) {
+      WorldGlobe.updatePins(countriesForUi(state));
+      renderCountryPanel();
+      renderStats();
+    }
   }
 
-  function persistPlanner({ flush, skipPlannerRender } = {}) {
-    persist({ touchPlanner: true });
+  function persistNav() {
+    persist({ cloud: false, touchPlanner: false, refreshUi: false });
+  }
+
+  function persistPlanner({ flush, skipPlannerRender, cloud = true } = {}) {
+    persist({ touchPlanner: true, cloud, refreshUi: false });
     if (!skipPlannerRender && WorldPlanner?.isOpen?.()) WorldPlanner?.render?.(state);
-    if (flush && user?.uid && WorldCloud.configured) {
-      return WorldCloud.flushSave(user.uid, WorldStore.packCloudPayload(state));
+    if (flush && cloud && user?.uid && WorldCloud.configured) {
+      return WorldCloud.flushSave(user.uid, state).catch((e) => {
+        console.warn("Planner flush failed", e);
+        return { ok: false, error: e };
+      });
     }
     return Promise.resolve({ ok: true });
   }
@@ -452,31 +470,13 @@ window.WorldApp = (() => {
 
   function mergeCloudState(local, remote) {
     if (!remote) return WorldStore.reconcileState(local);
-
-    const countries = new Map((local?.countries || []).map((c) => [c.id, { ...c }]));
-    for (const c of remote?.countries || []) {
-      const prev = countries.get(c.id);
-      countries.set(c.id, prev ? { ...prev, ...c } : { ...c });
+    const next = WorldStore.applyCloudPayload(local, remote);
+    if (local?.planner && next?.planner) {
+      next.planner.view = local.planner.view || next.planner.view;
+      next.planner.activeTripId = local.planner.activeTripId || next.planner.activeTripId;
+      next.planner.activeDayNum = local.planner.activeDayNum || next.planner.activeDayNum;
     }
-
-    const mergedPlanner = WorldStore.mergePlannerKeepNav(local?.planner, remote?.planner);
-    const plannerUpdatedAt = mergedPlanner.updatedAt
-      || remote?.plannerUpdatedAt
-      || local?.plannerUpdatedAt
-      || null;
-
-    const next = {
-      ...local,
-      ...remote,
-      countries: [...countries.values()],
-      planner: mergedPlanner,
-      plannerUpdatedAt,
-    };
-
-    if (!remote.places?.length && local?.places?.length) next.places = local.places;
-    if (!remote.countries?.length && local?.countries?.length) next.countries = local.countries;
-
-    return WorldStore.reconcileState(next);
+    return next;
   }
 
   async function waitForGlobeLib(timeoutMs = 15000) {
@@ -579,12 +579,29 @@ window.WorldApp = (() => {
         state = mergeCloudState(local, cloud);
       } else {
         state = local;
-        WorldCloud.scheduleSave(u.uid, WorldStore.packCloudPayload(state));
       }
       WorldStore.saveState(state);
+      WorldCloud.resumeQuota?.();
+      const needsMigrate = !cloud || cloud.v !== 2 || !!cloud.places || !!cloud.countries;
+      const localNewer = Date.parse(local?.plannerUpdatedAt || local?.planner?.updatedAt || 0)
+        > Date.parse(cloud?.plannerUpdatedAt || cloud?.planner?.updatedAt || 0);
+      if (needsMigrate || localNewer || !WorldStore.hasCloudData(cloud)) {
+        WorldCloud.scheduleSave(u.uid, state);
+      }
       WorldCloud.listenCloud(u.uid, (remote) => {
+        const plannerOpen = WorldPlanner?.isOpen?.();
+        const prev = state?.planner ? { ...state.planner } : null;
         state = mergeCloudState(state, remote);
+        if (plannerOpen && prev && state.planner) {
+          state.planner.view = prev.view;
+          state.planner.activeTripId = prev.activeTripId;
+          state.planner.activeDayNum = prev.activeDayNum;
+        }
         WorldStore.saveState(state);
+        if (plannerOpen) {
+          renderStats();
+          return;
+        }
         refresh();
         ensureGlobe();
       });
@@ -616,6 +633,11 @@ window.WorldApp = (() => {
       state = WorldStore.reconcileState(WorldStore.loadState());
       CountryMeta.init(state.countries);
       refresh();
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden" && user?.uid && WorldCloud.configured) {
+          WorldCloud.flushSave(user.uid, state).catch(() => {});
+        }
+      });
 
       if (!WorldCloud.configured) {
         $("auth-config-hint").hidden = false;
@@ -648,7 +670,7 @@ window.WorldApp = (() => {
   }
 
   return {
-    start, ready: () => ready, getState, setState, cloneState, persist, persistPlanner, refresh, toast,
+    start, ready: () => ready, getState, setState, cloneState, persist, persistNav, persistPlanner, refresh, toast,
     getUser: () => user,
     selectCountry, showDayPlacesOnCountry, get selectedCountry() { return selectedCountry; },
   };

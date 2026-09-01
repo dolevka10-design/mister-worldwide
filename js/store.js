@@ -25,28 +25,181 @@ window.WorldStore = (() => {
     };
   }
 
+  function seedPlaceMap() {
+    return new Map((seed?.places || []).map((p) => [p.id, p]));
+  }
+
+  function seedCountryMap() {
+    return new Map((seed?.countries || []).map((c) => [c.id, c]));
+  }
+
+  function isCompactPayload(data) {
+    return !!(data && (data.v === 2 || (Array.isArray(data.userPlaces) && !data.places)));
+  }
+
+  function placeCoreEqual(a, b) {
+    if (!a || !b) return false;
+    const lat = (n) => (Number.isFinite(n) ? n.toFixed(5) : "");
+    return a.name === b.name
+      && (a.city || "") === (b.city || "")
+      && (a.countryId || "") === (b.countryId || "")
+      && (a.url || "") === (b.url || "")
+      && lat(a.lat) === lat(b.lat)
+      && lat(a.lng) === lat(b.lng);
+  }
+
+  function stripPlace(p) {
+    return {
+      id: p.id,
+      countryId: p.countryId,
+      name: p.name,
+      city: p.city || "",
+      category: p.category || "",
+      lat: p.lat,
+      lng: p.lng,
+      url: p.url || "",
+      description: p.description || "",
+    };
+  }
+
+  function compactUserData(state) {
+    if (isCompactPayload(state) && !state.places) {
+      return {
+        v: 2,
+        planner: state.planner || emptyPlanner(),
+        plannerUpdatedAt: state.plannerUpdatedAt || state.planner?.updatedAt || null,
+        userPlaces: state.userPlaces || [],
+        deletedPlaceIds: state.deletedPlaceIds || [],
+        extraCountries: state.extraCountries || [],
+        overrides: state.overrides || {},
+        updatedAt: state.updatedAt || new Date().toISOString(),
+      };
+    }
+    const seedPlaces = seedPlaceMap();
+    const seedCountries = seedCountryMap();
+    const planner = state?.planner || emptyPlanner();
+    const plannerOut = {
+      trips: planner.trips || [],
+      activeTripId: planner.activeTripId || null,
+      view: planner.view || "list",
+      activeDayNum: planner.activeDayNum || 1,
+      updatedAt: planner.updatedAt || null,
+    };
+    if (!seedPlaces.size) {
+      return {
+        v: 2,
+        planner: plannerOut,
+        plannerUpdatedAt: state?.plannerUpdatedAt || planner.updatedAt || null,
+        userPlaces: [],
+        deletedPlaceIds: [],
+        extraCountries: (state?.countries || []).filter((c) => c?.id && !seedCountries.has(c.id)),
+        overrides: state?.overrides || {},
+        updatedAt: state?.updatedAt || new Date().toISOString(),
+      };
+    }
+    const userPlaces = [];
+    const seen = new Set();
+    for (const p of state?.places || []) {
+      if (!p?.id) continue;
+      seen.add(p.id);
+      const seedP = seedPlaces.get(p.id);
+      if (!seedP || !placeCoreEqual(p, seedP)) userPlaces.push(stripPlace(p));
+    }
+    const deletedPlaceIds = [];
+    if (seen.size >= Math.max(50, seedPlaces.size * 0.5)) {
+      for (const id of seedPlaces.keys()) {
+        if (!seen.has(id)) deletedPlaceIds.push(id);
+      }
+    }
+    const extraCountries = (state?.countries || []).filter((c) => c?.id && !seedCountries.has(c.id));
+    return {
+      v: 2,
+      planner: plannerOut,
+      plannerUpdatedAt: state?.plannerUpdatedAt || planner.updatedAt || null,
+      userPlaces,
+      deletedPlaceIds,
+      extraCountries,
+      overrides: state?.overrides || {},
+      updatedAt: state?.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  function hydrateUserData(data) {
+    const state = defaultState();
+    if (!data) return state;
+    if (data.planner) state.planner = { ...emptyPlanner(), ...data.planner };
+    state.plannerUpdatedAt = data.plannerUpdatedAt || data.planner?.updatedAt || null;
+    state.overrides = data.overrides || {};
+    state.updatedAt = data.updatedAt || state.updatedAt;
+
+    const byId = new Map(state.places.map((p) => [p.id, { ...p }]));
+    for (const p of data.userPlaces || []) {
+      if (!p?.id) continue;
+      byId.set(p.id, { ...(byId.get(p.id) || {}), ...p });
+    }
+    for (const id of data.deletedPlaceIds || []) byId.delete(id);
+    state.places = [...byId.values()];
+
+    const cById = new Map(state.countries.map((c) => [c.id, { ...c }]));
+    for (const c of data.extraCountries || []) {
+      if (c?.id) cById.set(c.id, { ...(cById.get(c.id) || {}), ...c });
+    }
+    state.countries = [...cById.values()];
+    return reconcileState(state);
+  }
+
   function loadState() {
     try {
       const raw = localStorage.getItem(storageKey());
       if (!raw) return defaultState();
       const parsed = JSON.parse(raw);
-      const base = defaultState();
-      return {
-        ...base,
-        ...parsed,
-        countries: parsed.countries?.length ? parsed.countries : base.countries,
-        places: parsed.places?.length ? parsed.places : base.places,
-        planner: parsed.planner || base.planner,
-        plannerUpdatedAt: parsed.plannerUpdatedAt || parsed.planner?.updatedAt || null,
-      };
+      const state = isCompactPayload(parsed)
+        ? hydrateUserData(parsed)
+        : reconcileState({
+          ...defaultState(),
+          ...parsed,
+          countries: parsed.countries?.length ? parsed.countries : (seed?.countries || []).map((c) => ({ ...c })),
+          places: parsed.places?.length ? parsed.places : (seed?.places || []).map((p) => ({ ...p })),
+          planner: parsed.planner || emptyPlanner(),
+          plannerUpdatedAt: parsed.plannerUpdatedAt || parsed.planner?.updatedAt || null,
+        });
+      if (!isCompactPayload(parsed)) {
+        try { saveState(state); } catch { /* compact rewrite best-effort */ }
+      }
+      return state;
     } catch {
       return defaultState();
     }
   }
 
   function saveState(state) {
+    if (!state) return false;
     state.updatedAt = new Date().toISOString();
-    localStorage.setItem(storageKey(), JSON.stringify(state));
+    const payload = compactUserData(state);
+    const json = JSON.stringify(payload);
+    try {
+      localStorage.setItem(storageKey(), json);
+      return true;
+    } catch (e) {
+      console.warn("Local save failed", e);
+      try {
+        const slim = {
+          v: 2,
+          planner: payload.planner,
+          plannerUpdatedAt: payload.plannerUpdatedAt,
+          userPlaces: payload.userPlaces,
+          deletedPlaceIds: [],
+          extraCountries: payload.extraCountries,
+          overrides: {},
+          updatedAt: payload.updatedAt,
+        };
+        localStorage.setItem(storageKey(), JSON.stringify(slim));
+        return true;
+      } catch (e2) {
+        console.warn("Planner-only save failed", e2);
+        return false;
+      }
+    }
   }
 
   async function loadSeed() {
@@ -119,7 +272,9 @@ window.WorldStore = (() => {
 
   function recategorizePlaces(state) {
     if (!state?.places?.length || typeof PlaceCategorize === "undefined") return;
+    const seedIds = seedPlaceMap();
     for (const p of state.places) {
+      if (seedIds.has(p.id)) continue;
       p.category = PlaceCategorize.categorize(p.name, p.description);
     }
     const cats = new Set(state.places.map((p) => p.category));
@@ -231,18 +386,62 @@ window.WorldStore = (() => {
   }
 
   function packCloudPayload(state) {
+    const compact = compactUserData(state);
     return {
-      countries: state.countries,
-      places: state.places,
-      overrides: state.overrides || {},
-      planner: state.planner || emptyPlanner(),
-      plannerUpdatedAt: state.plannerUpdatedAt || state.planner?.updatedAt || null,
-      updatedAt: state.updatedAt,
+      v: 2,
+      planner: {
+        trips: compact.planner.trips,
+        activeTripId: compact.planner.activeTripId || null,
+        updatedAt: compact.planner.updatedAt || null,
+      },
+      plannerUpdatedAt: compact.plannerUpdatedAt,
+      userPlaces: compact.userPlaces,
+      deletedPlaceIds: compact.deletedPlaceIds,
+      extraCountries: compact.extraCountries,
+      overrides: compact.overrides,
+      updatedAt: compact.updatedAt,
     };
   }
 
+  function applyCloudPayload(local, remote) {
+    if (!remote) return local;
+    const remoteCompact = isCompactPayload(remote) ? remote : compactUserData(remote);
+    const localCompact = compactUserData(local);
+    const userById = new Map();
+    for (const p of remoteCompact.userPlaces || []) if (p?.id) userById.set(p.id, p);
+    for (const p of localCompact.userPlaces || []) if (p?.id) userById.set(p.id, p);
+    const deleted = [...new Set([
+      ...(remoteCompact.deletedPlaceIds || []),
+      ...(localCompact.deletedPlaceIds || []),
+    ])];
+    const extraById = new Map();
+    for (const c of remoteCompact.extraCountries || []) if (c?.id) extraById.set(c.id, c);
+    for (const c of localCompact.extraCountries || []) if (c?.id) extraById.set(c.id, c);
+    const hydrated = hydrateUserData({
+      v: 2,
+      planner: mergePlannerKeepNav(local?.planner, remoteCompact.planner),
+      plannerUpdatedAt: localCompact.plannerUpdatedAt || remoteCompact.plannerUpdatedAt,
+      userPlaces: [...userById.values()],
+      deletedPlaceIds: deleted,
+      extraCountries: [...extraById.values()],
+      overrides: { ...(remoteCompact.overrides || {}), ...(localCompact.overrides || {}) },
+      updatedAt: localCompact.updatedAt || remoteCompact.updatedAt,
+    });
+    if (local?.planner && hydrated.planner) {
+      hydrated.planner.view = local.planner.view || hydrated.planner.view;
+      hydrated.planner.activeTripId = local.planner.activeTripId || hydrated.planner.activeTripId;
+      hydrated.planner.activeDayNum = local.planner.activeDayNum || hydrated.planner.activeDayNum;
+    }
+    return hydrated;
+  }
+
   function hasCloudData(remote) {
-    return !!(remote?.places?.length || remote?.planner?.trips?.length || remote?.countries?.length);
+    return !!(
+      remote?.planner?.trips?.length
+      || remote?.userPlaces?.length
+      || remote?.places?.length
+      || remote?.countries?.length
+    );
   }
 
   function placesByCountry(state, countryId, opts = {}) {
@@ -360,6 +559,8 @@ window.WorldStore = (() => {
     loadSeed, loadState, saveState, defaultState, setUserEmail, uid,
     nextPlaceId, recalcCountry, reconcileState, recategorizePlaces, countriesForUi, placesByCountry, groupByCity, groupByCategory,
     exportCountryCsv, importCsvPlaces,
-    emptyPlanner, touchPlanner, mergePlanner, mergePlannerKeepNav, packCloudPayload, hasCloudData,
+    emptyPlanner, touchPlanner, mergePlanner, mergePlannerKeepNav, packCloudPayload, applyCloudPayload,
+    compactUserData, hydrateUserData, isCompactPayload, hasCloudData,
+    setSeed(data) { seed = data; }, getSeed() { return seed; },
   };
 })();

@@ -39,7 +39,10 @@ window.WorldPlanner = (() => {
     if (!actEl?.dataset?.act || actEl.disabled) return;
     const key = `${actEl.dataset.act}:${actEl.dataset.tripId || ""}:${actEl.dataset.day || ""}:${actEl.dataset.item || ""}`;
     const now = Date.now();
-    if (e?.type === "click" && lastTouchKey === key && now - lastActionAt < 600) return;
+    if (lastActionKey === key && now - lastActionAt < 400) {
+      if (e?.type === "click" && lastTouchKey === key) return;
+      if (e?.type === "click" && now - lastActionAt < 250) return;
+    }
     if (e?.type === "touchend") lastTouchKey = key;
     lastActionAt = now;
     lastActionKey = key;
@@ -1009,6 +1012,18 @@ window.WorldPlanner = (() => {
     URL.revokeObjectURL(a.href);
   }
 
+  function rememberNav(state) {
+    const p = ensurePlanner(state);
+    try {
+      sessionStorage.setItem("plannerNav", JSON.stringify({
+        view: p.view,
+        tripId: p.activeTripId,
+        dayNum: p.activeDayNum || activeDayNum,
+        ts: Date.now(),
+      }));
+    } catch { /* */ }
+  }
+
   function scrollPlannerToDay() {
     requestAnimationFrame(() => {
       const b = document.querySelector(".planner-body");
@@ -1029,7 +1044,8 @@ window.WorldPlanner = (() => {
     trip.activeDayNum = activeDayNum;
     ensurePlanner(state).activeDayNum = activeDayNum;
     lastScroll = 0;
-    if (persist) WorldApp.persistPlanner({ skipPlannerRender: true });
+    rememberNav(state);
+    try { WorldApp.persistNav?.(); } catch { /* */ }
     render(state);
     scrollPlannerToDay();
     scrollActiveDayChip();
@@ -1038,7 +1054,7 @@ window.WorldPlanner = (() => {
   function renderTripNavBar(state, trip) {
     return `
       <div class="planner-trip-nav card">
-        <button type="button" class="btn btn-ghost btn-sm" data-act="trips-back">← Trips</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-act="trips-back" onclick="WorldPlanner.act(event)">← Trips</button>
         <div class="planner-trip-nav-meta">
           <strong>${esc(trip.name)}</strong>
           <span class="muted">${esc(formatTripDates(trip))}</span>
@@ -1260,12 +1276,12 @@ window.WorldPlanner = (() => {
         <div class="day-layout-bar">
           <span class="muted day-layout-label">View</span>
           <div class="day-layout-toggle" role="group" aria-label="Day list layout">
-            <button type="button" class="day-layout-btn ${listMode === "category" ? "active" : ""}" data-act="day-layout" data-layout="category">Categories</button>
-            <button type="button" class="day-layout-btn ${listMode === "timeline" ? "active" : ""}" data-act="day-layout" data-layout="timeline">Timeline</button>
+            <button type="button" class="day-layout-btn ${listMode === "category" ? "active" : ""}" data-act="day-layout" data-layout="category" onclick="WorldPlanner.act(event)">Categories</button>
+            <button type="button" class="day-layout-btn ${listMode === "timeline" ? "active" : ""}" data-act="day-layout" data-layout="timeline" onclick="WorldPlanner.act(event)">Timeline</button>
           </div>
         </div>
         <div class="day-map-bar card">
-          <button type="button" class="btn btn-secondary" data-act="day-map" data-day="${dayNum}">🌍 Map this day on globe</button>
+          <button type="button" class="btn btn-secondary" data-act="day-map" data-day="${dayNum}" onclick="WorldPlanner.act(event)">🌍 Map this day on globe</button>
         </div>
         <div class="day-sections">
           ${renderDayActivities(state, trip, day, dayNum)}
@@ -1345,9 +1361,9 @@ window.WorldPlanner = (() => {
               <button type="button" class="btn btn-primary btn-sm" data-act="adopt-sug" data-sug="${esc(s.id)}">Add</button>
             </li>`).join("")}</ul></section>` : ""}
         <footer class="planner-footer">
-          <button type="button" class="btn btn-secondary" data-act="suggest">Quick suggest</button>
-          <button type="button" class="btn btn-secondary" data-act="export">Export Excel</button>
-          <button type="button" class="btn btn-primary" data-act="save">Save trip</button>
+          <button type="button" class="btn btn-secondary" data-act="suggest" onclick="WorldPlanner.act(event)">Quick suggest</button>
+          <button type="button" class="btn btn-secondary" data-act="export" onclick="WorldPlanner.act(event)">Export Excel</button>
+          <button type="button" class="btn btn-primary" data-act="save" onclick="WorldPlanner.act(event)">Save trip</button>
         </footer>
       </article>`;
   }
@@ -1356,13 +1372,11 @@ window.WorldPlanner = (() => {
     const state = stateIn || WorldApp.getState();
     const panel = $("planner-panel");
     if (!panel) return;
-    restorePlannerNav(state);
     ensurePlanner(state);
     syncUiFromState(state);
     const body = panel.querySelector(".planner-body");
     if (body) lastScroll = body.scrollTop;
     const trip = getActiveTrip(state);
-    const trips = state.planner.trips || [];
     const view = plannerView(state);
     const showList = view === "list";
     const showTrip = view === "trip" && !!trip;
@@ -1393,10 +1407,14 @@ window.WorldPlanner = (() => {
     return state;
   }
 
-  function persistLive({ flush, toast: msg, scroll } = {}) {
+  function persistLive({ flush, toast: msg, scroll, cloud = true } = {}) {
     const body = document.querySelector(".planner-body");
     if (body) lastScroll = body.scrollTop;
-    WorldApp.persistPlanner({ flush, skipPlannerRender: true });
+    try {
+      WorldApp.persistPlanner({ flush, skipPlannerRender: true, cloud });
+    } catch (err) {
+      console.warn("Planner persist failed", err);
+    }
     render(WorldApp.getState());
     requestAnimationFrame(() => {
       const b = document.querySelector(".planner-body");
@@ -1431,17 +1449,17 @@ window.WorldPlanner = (() => {
       panel.hidden = false;
     }
     try {
-      sessionStorage.setItem("plannerNav", JSON.stringify({ view: "trip", tripId, dayNum: n, ts: Date.now() }));
+      rememberNav(state);
     } catch { /* */ }
-    WorldStore.saveState(state);
+    try { WorldStore.saveState(state); } catch { /* */ }
     render(state);
     scrollPlannerToDay();
     scrollActiveDayChip();
-    WorldApp.persist({ touchPlanner: true });
+    try { WorldApp.persistNav?.(); } catch { /* */ }
     if (flush && WorldCloud?.configured) {
       setTimeout(() => {
-        WorldApp.persistPlanner({ flush: true, skipPlannerRender: true }).catch(() => {});
-      }, 300);
+        WorldApp.persistPlanner({ flush: true, skipPlannerRender: true, cloud: true }).catch(() => {});
+      }, 400);
     }
     if (msg) WorldApp.toast(msg);
     return trip;
@@ -1477,17 +1495,20 @@ window.WorldPlanner = (() => {
       setPlannerView(state, "create", null);
       showCreate = true;
       tripListOpen = true;
-      WorldApp.persist({ touchPlanner: true });
+      rememberNav(state);
+      try { WorldApp.persistNav?.(); } catch { /* */ }
       return render(state);
     }
     if (act === "trips-back") {
       setPlannerView(state, "list");
       tripListOpen = true;
-      WorldApp.persist({ touchPlanner: true });
+      rememberNav(state);
+      try { WorldApp.persistNav?.(); } catch { /* */ }
       return render(state);
     }
     if (act === "open-trip") {
-      return enterTripView(state, actEl.dataset.tripId, { dayNum: 1 });
+      const t = state.planner.trips.find((x) => x.id === actEl.dataset.tripId);
+      return enterTripView(state, actEl.dataset.tripId, { dayNum: t?.activeDayNum || 1 });
     }
     if (act === "delete-trip") {
       e.preventDefault();
@@ -1502,8 +1523,8 @@ window.WorldPlanner = (() => {
         setPlannerView(state, "list", null);
         tripListOpen = true;
       }
-      WorldApp.persist({ touchPlanner: true });
-      WorldApp.persistPlanner({ flush: true, skipPlannerRender: true });
+      WorldApp.persist({ touchPlanner: true, cloud: true, refreshUi: false });
+      WorldApp.persistPlanner({ flush: true, skipPlannerRender: true, cloud: true });
       render(state);
       return WorldApp.toast(`Deleted "${t.name}"`);
     }
@@ -1561,7 +1582,7 @@ window.WorldPlanner = (() => {
     if (act === "day-layout") {
       if (!trip) return;
       trip.dayListMode = actEl.dataset.layout === "timeline" ? "timeline" : "category";
-      WorldApp.persist({ touchPlanner: true });
+      try { WorldApp.persistNav?.(); } catch { /* */ }
       return render(state);
     }
     if (act === "activity-detail") {
@@ -1655,7 +1676,7 @@ window.WorldPlanner = (() => {
     if (act === "item-remove") {
       if (!trip) return;
       removeItem(trip, Number(actEl.dataset.day), actEl.dataset.item);
-      WorldApp.persist({ touchPlanner: true });
+      WorldApp.persist({ touchPlanner: true, cloud: true, refreshUi: false });
       render(state);
       return;
     }
@@ -1693,7 +1714,7 @@ window.WorldPlanner = (() => {
     if (el.id === "trip-name-edit") {
       trip.name = el.value.trim() || trip.name;
       trip.updatedAt = new Date().toISOString();
-      WorldApp.persistPlanner({ skipPlannerRender: true });
+      WorldApp.persistPlanner({ skipPlannerRender: true, cloud: true });
       return;
     }
     if (el.id === "planner-import-file") return;
@@ -1729,7 +1750,7 @@ window.WorldPlanner = (() => {
     if (act === "item-name") updateItem(trip, day, id, { name: el.value.trim() || "Place" });
     if (act === "item-notes") updateItem(trip, day, id, { notes: el.value.trim() });
     if (act === "item-time" || act === "item-name" || act === "item-notes") {
-      WorldApp.persistPlanner({ skipPlannerRender: true });
+      WorldApp.persistPlanner({ skipPlannerRender: true, cloud: true });
     }
   }
 
