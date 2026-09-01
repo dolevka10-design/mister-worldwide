@@ -160,7 +160,7 @@ window.WorldStore = (() => {
   }
 
   function emptyPlanner() {
-    return { trips: [], activeTripId: null, updatedAt: null };
+    return { trips: [], activeTripId: null, view: "list", activeDayNum: 1, updatedAt: null };
   }
 
   function touchPlanner(state) {

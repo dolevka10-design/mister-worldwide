@@ -42,10 +42,47 @@ window.WorldPlanner = (() => {
   }
 
   function ensurePlanner(state) {
-    if (!state.planner) state.planner = { trips: [], activeTripId: null };
+    if (!state.planner) state.planner = { trips: [], activeTripId: null, view: "list", activeDayNum: 1 };
     if (!Array.isArray(state.planner.trips)) state.planner.trips = [];
+    if (!state.planner.view) {
+      state.planner.view = state.planner.activeTripId ? "trip" : (state.planner.trips.length ? "list" : "create");
+    }
+    if (!state.planner.activeDayNum) state.planner.activeDayNum = 1;
     for (const t of state.planner.trips) migrateTrip(t);
     return state.planner;
+  }
+
+  function setPlannerView(state, view, tripId, dayNum) {
+    const p = ensurePlanner(state);
+    p.view = view;
+    if (tripId !== undefined) p.activeTripId = tripId || null;
+    if (dayNum != null) p.activeDayNum = dayNum;
+  }
+
+  function syncUiFromState(state) {
+    const p = ensurePlanner(state);
+    const trip = getActiveTrip(state);
+    if (p.view === "trip" && trip) {
+      tripListOpen = false;
+      showCreate = false;
+      activeDayNum = clampDayNum(trip, p.activeDayNum || 1);
+      p.activeDayNum = activeDayNum;
+    } else if (p.view === "create") {
+      tripListOpen = true;
+      showCreate = true;
+    } else {
+      tripListOpen = true;
+      showCreate = !p.trips.length;
+    }
+  }
+
+  function plannerView(state) {
+    const p = ensurePlanner(state);
+    const trip = getActiveTrip(state);
+    if (!p.trips.length && !trip) return "create";
+    if (p.view === "trip" && trip) return "trip";
+    if (p.view === "create") return "create";
+    return "list";
   }
 
   function parseDate(s) {
@@ -153,6 +190,16 @@ window.WorldPlanner = (() => {
     if (ends.length) trip.endDate = ends[ends.length - 1];
   }
 
+  function hasStableDayPlan(trip) {
+    if (trip.daysSource === "import" || trip.daysLocked) return true;
+    const days = trip.days || [];
+    if (!days.length) return false;
+    const dated = days.filter((d) => d.date);
+    if (dated.length !== days.length) return false;
+    const uniqueDates = new Set(dated.map((d) => d.date));
+    return uniqueDates.size === days.length;
+  }
+
   function migrateTrip(trip) {
     if (!trip) return trip;
     if (!Array.isArray(trip.guides)) trip.guides = [];
@@ -166,7 +213,12 @@ window.WorldPlanner = (() => {
       }];
     }
     for (const s of trip.segments) normalizeSegDates(s);
-    rebuildDays(trip);
+    if (hasStableDayPlan(trip)) {
+      trip.dayCount = trip.days.length;
+      syncTripBounds(trip);
+    } else {
+      rebuildDays(trip);
+    }
     return trip;
   }
 
@@ -279,6 +331,9 @@ window.WorldPlanner = (() => {
     if (planner.activeTripId === tripId) {
       planner.activeTripId = planner.trips[0]?.id || null;
       activeDayNum = 1;
+      planner.activeDayNum = 1;
+      if (planner.activeTripId) setPlannerView(state, "trip", planner.activeTripId, 1);
+      else setPlannerView(state, planner.trips.length ? "list" : "create", null, 1);
       showCreate = !planner.trips.length;
     }
     return true;
@@ -396,12 +451,19 @@ window.WorldPlanner = (() => {
     return true;
   }
 
+  function unlockTripDays(trip) {
+    if (!trip) return;
+    delete trip.daysSource;
+    delete trip.daysLocked;
+  }
+
   function updateSegment(trip, segId, patch) {
     const seg = trip.segments.find((s) => s.id === segId);
     if (!seg) return false;
     Object.assign(seg, patch);
     normalizeSegDates(seg);
     syncTripBounds(trip);
+    unlockTripDays(trip);
     rebuildDays(trip);
     return true;
   }
@@ -410,6 +472,7 @@ window.WorldPlanner = (() => {
     if (!trip.segments || trip.segments.length <= 1) return false;
     trip.segments = trip.segments.filter((s) => s.id !== segId);
     syncTripBounds(trip);
+    unlockTripDays(trip);
     rebuildDays(trip);
     return true;
   }
@@ -421,6 +484,7 @@ window.WorldPlanner = (() => {
     if (newIdx < 0 || newIdx >= trip.segments.length) return false;
     [trip.segments[idx], trip.segments[newIdx]] = [trip.segments[newIdx], trip.segments[idx]];
     syncTripBounds(trip);
+    unlockTripDays(trip);
     rebuildDays(trip);
     return true;
   }
@@ -433,6 +497,7 @@ window.WorldPlanner = (() => {
     });
     trip.segments.push(seg);
     syncTripBounds(trip);
+    unlockTripDays(trip);
     rebuildDays(trip);
     return seg.id;
   }
@@ -492,8 +557,7 @@ window.WorldPlanner = (() => {
 
   async function importDraft(state, draft) {
     const segments = [];
-    const dayItems = new Map();
-    for (const seg of draft.segments) {
+    for (const seg of draft.segments || []) {
       const countryName = seg.countryName || "";
       let countryId = "";
       if (countryName) {
@@ -501,42 +565,19 @@ window.WorldPlanner = (() => {
         countryId = c?.id || "";
       }
       if (!countryId) {
-        for (const row of seg.rows) {
-          const match = (state.places || []).find((p) => p.name.toLowerCase() === row.place.toLowerCase());
-          if (match) { countryId = match.countryId; break; }
-        }
-      }
-      if (!countryId) {
         const c = (state.countries || []).find((x) => /united states|usa/i.test(x.name)) || state.countries[0];
         countryId = c?.id || "";
       }
-      const id = WorldStore.uid("seg");
       segments.push({
-        id, countryId, city: seg.city, startDate: seg.startDate, endDate: seg.endDate,
+        id: WorldStore.uid("seg"),
+        countryId,
+        city: seg.city || "Other",
+        startDate: seg.startDate,
+        endDate: seg.endDate,
       });
-      for (const row of seg.rows) {
-        const cat = PlaceCategorize.fromPlannerLabel(row.category) || PlaceCategorize.categorize(row.place, row.notes);
-        const place = upsertPlaceFromItem(state, {
-          name: row.place, city: row.location || seg.city, countryId, countryName,
-          category: cat, url: row.url, notes: row.notes,
-        });
-        const key = row.date || `${id}|${row.day || ""}`;
-        if (!dayItems.has(key)) dayItems.set(key, []);
-        dayItems.get(key).push({
-          id: WorldStore.uid("item"),
-          time: row.time || "",
-          name: row.place,
-          notes: row.notes || "",
-          category: cat,
-          url: row.url || place?.url || "",
-          placeId: place?.id || "",
-          slot: PlaceCategorize.defaultSlot(cat),
-          lat: place?.lat, lng: place?.lng,
-          date: row.date,
-          day: row.day,
-          segmentId: id,
-        });
-      }
+    }
+    if (!segments.length) {
+      segments.push({ id: WorldStore.uid("seg"), countryId: "", city: "Other", startDate: draft.startDate, endDate: draft.endDate });
     }
 
     const trip = createTrip(state, {
@@ -544,35 +585,62 @@ window.WorldPlanner = (() => {
       startDate: draft.startDate,
       endDate: draft.endDate,
       segments,
+      dayCount: draft.dayPlans?.length || 0,
       guides: (draft.guides || []).map((g) => ({ id: WorldStore.uid("guide"), title: g.title, body: g.body, city: g.city || "" })),
     });
 
-    const stripMeta = (it) => {
-      const { date, day, segmentId, ...rest } = it;
-      return rest;
-    };
+    const segByCity = new Map((trip.segments || []).map((s) => [s.city, s]));
 
-    for (const day of trip.days) {
-      let items = [];
-      if (day.date && dayItems.has(day.date)) {
-        items = dayItems.get(day.date);
-      } else {
-        for (const [, list] of dayItems) {
-          const byDay = list.filter((it) => it.day === day.day);
-          if (byDay.length) { items = byDay; break; }
-        }
+    function itemFromRow(row, countryId, countryName, city) {
+      const cat = PlaceCategorize.fromPlannerLabel(row.category) || PlaceCategorize.categorize(row.place, row.notes);
+      const place = upsertPlaceFromItem(state, {
+        name: row.place, city: city || row.location, countryId, countryName,
+        category: cat, url: row.url, notes: row.notes,
+      });
+      let lat = place?.lat;
+      let lng = place?.lng;
+      if (row.url) {
+        const coords = WorldMapsImport?.parseCoordsFromUrl?.(row.url);
+        if (coords?.lat && coords?.lng) { lat = coords.lat; lng = coords.lng; }
       }
-      if (day.segmentId) items = items.filter((it) => !it.segmentId || it.segmentId === day.segmentId);
-      day.items = items.map(stripMeta);
+      return {
+        id: WorldStore.uid("item"),
+        time: row.time || "",
+        name: row.place,
+        notes: row.notes || "",
+        category: cat,
+        url: row.url || place?.url || "",
+        placeId: place?.id || "",
+        slot: PlaceCategorize.defaultSlot(cat),
+        lat, lng,
+      };
     }
 
-    for (const [, list] of dayItems) {
-      for (const it of list) {
-        if (!it.url) continue;
-        const coords = WorldMapsImport?.parseCoordsFromUrl?.(it.url);
-        if (coords?.lat && coords?.lng) {
-          it.lat = coords.lat;
-          it.lng = coords.lng;
+    if (draft.dayPlans?.length) {
+      trip.days = draft.dayPlans.map((plan, i) => {
+        const seg = segByCity.get(plan.location) || trip.segments[0];
+        const country = state.countries.find((c) => c.id === seg?.countryId);
+        const items = (plan.rows || []).map((row) =>
+          itemFromRow(row, seg?.countryId, country?.name, plan.location)
+        );
+        return {
+          day: i + 1,
+          date: plan.date,
+          segmentId: seg?.id || null,
+          items,
+          notes: "",
+          slots: {},
+        };
+      });
+      trip.dayCount = trip.days.length;
+      trip.startDate = trip.days[0]?.date || draft.startDate;
+      trip.endDate = trip.days[trip.days.length - 1]?.date || draft.endDate;
+      trip.daysSource = "import";
+      for (const seg of trip.segments) {
+        const segDays = trip.days.filter((d) => d.segmentId === seg.id);
+        if (segDays.length) {
+          seg.startDate = segDays[0].date;
+          seg.endDate = segDays[segDays.length - 1].date;
         }
       }
     }
@@ -818,6 +886,7 @@ window.WorldPlanner = (() => {
     if (!trip) return;
     activeDayNum = clampDayNum(trip, dayNum);
     trip.activeDayNum = activeDayNum;
+    ensurePlanner(state).activeDayNum = activeDayNum;
     lastScroll = 0;
     if (persist) WorldApp.persistPlanner({ skipPlannerRender: true });
     render(state);
@@ -1064,11 +1133,16 @@ window.WorldPlanner = (() => {
     const state = stateIn || WorldApp.getState();
     const panel = $("planner-panel");
     if (!panel) return;
+    ensurePlanner(state);
+    syncUiFromState(state);
     const body = panel.querySelector(".planner-body");
     if (body) lastScroll = body.scrollTop;
     const trip = getActiveTrip(state);
-    const trips = ensurePlanner(state).trips || [];
-    const showRail = tripListOpen || !trip;
+    const trips = state.planner.trips || [];
+    const view = plannerView(state);
+    const showList = view === "list";
+    const showTrip = view === "trip" && !!trip;
+    const showCreateForm = view === "create" || (!trips.length && !trip);
 
     panel.innerHTML = `
       <header class="planner-head">
@@ -1081,9 +1155,9 @@ window.WorldPlanner = (() => {
         <button type="button" class="btn btn-ghost btn-sm" data-act="close" aria-label="Close">✕</button>
       </header>
       <div class="planner-body">
-        ${showRail ? renderTripRail(state) : (trip ? renderTripNavBar(state, trip) : "")}
-        ${showCreate && showRail ? renderCreateForm(state) : ""}
-        ${trip && !showCreate ? renderTripDoc(state, trip) : (!trip && !showCreate && !trips.length ? renderCreateForm(state) : "")}
+        ${showList ? renderTripRail(state) : (showTrip ? renderTripNavBar(state, trip) : renderTripRail(state))}
+        ${showCreateForm && !showTrip ? renderCreateForm(state) : ""}
+        ${showTrip ? renderTripDoc(state, trip) : ""}
       </div>`;
 
     requestAnimationFrame(() => {
@@ -1111,39 +1185,37 @@ window.WorldPlanner = (() => {
     if (msg) WorldApp.toast(msg);
   }
 
-  function finishCreateTrip(state, created) {
-    created.activeDayNum = 1;
+  function enterTripView(state, tripId, { dayNum = 1, flush = false, toast: msg } = {}) {
+    const trip = ensurePlanner(state).trips.find((t) => t.id === tripId);
+    if (!trip) return null;
+    const n = clampDayNum(trip, dayNum);
+    setPlannerView(state, "trip", tripId, n);
+    activeDayNum = n;
+    trip.activeDayNum = n;
     showCreate = false;
     tripListOpen = false;
     open = true;
-    setActiveTrip(state, created.id);
+    lastScroll = 0;
     const panel = $("planner-panel");
     if (panel) {
       panel.classList.add("open");
       panel.hidden = false;
     }
+    WorldStore.saveState(state);
     WorldApp.persist({ touchPlanner: true });
-    WorldApp.persistPlanner({ flush: true, skipPlannerRender: true });
     render(state);
-    scrollPlannerToDay();
-    WorldApp.toast("Trip created & synced");
+    requestAnimationFrame(() => {
+      scrollPlannerToDay();
+      if (flush && WorldCloud?.configured) {
+        WorldApp.persistPlanner({ flush: true, skipPlannerRender: true }).catch(() => {});
+      }
+      if (msg) WorldApp.toast(msg);
+    });
+    return trip;
   }
 
-  function openTrip(state, tripId, { toast: msg, dayNum, flush = false } = {}) {
-    setActiveTrip(state, tripId);
-    showCreate = false;
-    tripListOpen = false;
-    activeDayNum = dayNum || 1;
-    const trip = getActiveTrip(state);
-    if (trip) {
-      activeDayNum = clampDayNum(trip, activeDayNum);
-      trip.activeDayNum = activeDayNum;
-    }
-    lastScroll = 0;
-    WorldApp.persistPlanner({ flush, skipPlannerRender: true });
-    render(state);
-    scrollPlannerToDay();
-    if (msg) WorldApp.toast(msg);
+  function finishCreateTrip(state, created) {
+    enterTripView(state, created.id, { dayNum: 1, flush: true, toast: "Trip created & synced" });
   }
 
   function onClick(e) {
@@ -1168,18 +1240,22 @@ window.WorldPlanner = (() => {
       return;
     }
     if (act === "new-trip") {
+      setPlannerView(state, "create", null);
       showCreate = true;
-      setActiveTrip(state, null);
+      tripListOpen = true;
+      WorldApp.persist({ touchPlanner: true });
       return render(state);
     }
     if (act === "trips-back") {
+      setPlannerView(state, "list");
       tripListOpen = true;
+      WorldApp.persist({ touchPlanner: true });
       return render(state);
     }
     if (act === "open-trip") {
       e.preventDefault();
       e.stopPropagation();
-      return openTrip(state, actEl.dataset.tripId, { dayNum: 1 });
+      return enterTripView(state, actEl.dataset.tripId, { dayNum: 1 });
     }
     if (act === "delete-trip") {
       e.preventDefault();
@@ -1188,7 +1264,12 @@ window.WorldPlanner = (() => {
       const t = state.planner.trips.find((x) => x.id === id);
       if (!t) return;
       deleteTrip(state, id);
-      if (!state.planner.activeTripId) tripListOpen = true;
+      if (state.planner.activeTripId) {
+        setPlannerView(state, "trip", state.planner.activeTripId);
+      } else {
+        setPlannerView(state, "list", null);
+        tripListOpen = true;
+      }
       WorldApp.persist({ touchPlanner: true });
       WorldApp.persistPlanner({ flush: true, skipPlannerRender: true });
       render(state);
@@ -1234,7 +1315,9 @@ window.WorldPlanner = (() => {
       const name = $("new-trip-name")?.value?.trim() || "My trip";
       if (!segments.length) return WorldApp.toast("Pick at least one country", "warn");
       const created = createTrip(state, { name, segments });
-      return finishCreateTrip(state, created);
+      WorldStore.saveState(state);
+      finishCreateTrip(state, created);
+      return;
     }
     if (act === "day-map") {
       if (!trip) return;
@@ -1413,10 +1496,7 @@ window.WorldPlanner = (() => {
       const draft = WorldPlannerImport.buildTripDraft(parsed);
       const state = WorldApp.getState();
       const trip = await importDraft(state, draft);
-      tripListOpen = false;
-      activeDayNum = 1;
-      trip.activeDayNum = 1;
-      openTrip(state, trip.id, { toast: `Imported ${draft.rowCount} rows & synced`, dayNum: 1, flush: true });
+      enterTripView(state, trip.id, { dayNum: 1, flush: true, toast: `Imported ${draft.rowCount} activities & synced` });
       return trip;
     } catch (err) {
       WorldApp.toast(err.message || "Import failed", "error");
@@ -1487,8 +1567,7 @@ window.WorldPlanner = (() => {
     addPlace(state, trip.id, dayNum, slot, pendingPlace, note);
     hideAddToTripModal();
     activeDayNum = dayNum;
-    toggle(true);
-    openTrip(state, trip.id, { toast: `Added to day ${dayNum}`, dayNum });
+    enterTripView(state, trip.id, { dayNum, flush: true, toast: `Added to day ${dayNum}` });
   }
 
   function toggle(on) {
@@ -1501,42 +1580,36 @@ window.WorldPlanner = (() => {
       const st = WorldApp.getState();
       const planner = ensurePlanner(st);
       const trip = getActiveTrip(st);
-      showCreate = !trip && !planner.trips.length;
-      if (trip) {
-        tripListOpen = false;
-        activeDayNum = clampDayNum(trip, trip.activeDayNum || activeDayNum);
-      } else {
-        tripListOpen = true;
+      if (!planner.view) {
+        if (trip) setPlannerView(st, "trip", trip.id, trip.activeDayNum || 1);
+        else if (!planner.trips.length) setPlannerView(st, "create", null);
+        else setPlannerView(st, "list", null);
       }
+      syncUiFromState(st);
       render(st);
     }
   }
 
+  function onPanelClick(e) {
+    const panel = $("planner-panel");
+    if (!panel || panel.hidden || !panel.contains(e.target)) return;
+    const actEl = e.target.closest("[data-act]");
+    if (!actEl || actEl.disabled) return;
+    if (e.target.closest("input, textarea, select, option") && !actEl.contains(e.target)) return;
+    if (e.target.closest("a.place-link, summary")) return;
+    onClick(e);
+  }
+
   function init() {
     if (bound) return;
-    bound = true;
     const panel = $("planner-panel");
-    let lastTap = 0;
+    if (!panel) return;
+    bound = true;
     $("btn-planner")?.addEventListener("click", () => toggle(true));
-    const handlePlannerTap = (e) => {
-      if (e.target.closest("input, select, textarea, a.place-link, summary, option, label.day-jump-field")) return;
-      const actEl = e.target.closest("[data-act]");
-      if (!actEl || actEl.disabled) return;
-      const now = Date.now();
-      if (now - lastTap < 280) return;
-      lastTap = now;
-      e.preventDefault();
-      e.stopPropagation();
-      onClick(e);
-    };
-    panel?.addEventListener("pointerup", handlePlannerTap, { passive: false });
-    panel?.addEventListener("click", (e) => {
-      if (e.pointerType === "touch") return;
-      handlePlannerTap(e);
-    });
-    panel?.addEventListener("change", onChange);
-    panel?.addEventListener("focusout", onBlur);
-    panel?.addEventListener("toggle", (e) => {
+    panel.addEventListener("click", onPanelClick);
+    panel.addEventListener("change", onChange);
+    panel.addEventListener("focusout", onBlur);
+    panel.addEventListener("toggle", (e) => {
       if (e.target?.classList?.contains("route-editor")) routeEditorOpen = e.target.open;
     }, true);
     $("planner-import-file")?.addEventListener("change", (e) => {
