@@ -541,13 +541,30 @@ window.WorldPlanner = (() => {
 
   function upsertPlaceFromItem(state, { name, city, countryId, countryName, category, url, lat, lng, notes }) {
     if (!name) return null;
+    const cleanName = String(name).trim();
+    const cleanCityName = (city || "Other").trim();
+    let parsedLat = lat;
+    let parsedLng = lng;
+    if (url && (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng))) {
+      const coords = WorldMapsImport?.parseCoordsFromUrl?.(url);
+      if (coords?.lat && coords?.lng) {
+        parsedLat = coords.lat;
+        parsedLng = coords.lng;
+      }
+    }
     const existing = (state.places || []).find((p) =>
-      p.name.toLowerCase() === name.toLowerCase()
-      && (p.city || "").toLowerCase() === (city || "").toLowerCase()
+      p.name.toLowerCase() === cleanName.toLowerCase()
+      && (p.city || "").toLowerCase() === cleanCityName.toLowerCase()
     );
     if (existing) {
       if (url && !existing.url) existing.url = url;
-      if (category && existing.category === "place") existing.category = category;
+      if (category && category !== "place") existing.category = category;
+      if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
+        existing.lat = parsedLat;
+        existing.lng = parsedLng;
+      }
+      if (notes && !existing.description) existing.description = notes;
+      WorldStore.recalcCountry(state, existing.countryId);
       return existing;
     }
     let cid = countryId;
@@ -569,13 +586,13 @@ window.WorldPlanner = (() => {
     const place = {
       id: WorldStore.nextPlaceId(state),
       countryId: cid,
-      name,
-      city: city || "Other",
-      category: category || PlaceCategorize.categorize(name, notes || ""),
-      lat: Number.isFinite(lat) ? lat : (country?.lat || 0),
-      lng: Number.isFinite(lng) ? lng : (country?.lng || 0),
+      name: cleanName,
+      city: cleanCityName || "Other",
+      category: category || PlaceCategorize.categorize(cleanName, notes || ""),
+      lat: Number.isFinite(parsedLat) ? parsedLat : (country?.lat || 0),
+      lng: Number.isFinite(parsedLng) ? parsedLng : (country?.lng || 0),
       url: url || "",
-      description: `${city || ""} | ${country?.name || countryName || ""} | ${url || ""}`,
+      description: `${cleanCityName || ""} | ${country?.name || countryName || ""} | ${notes || ""} | ${url || ""}`.replace(/\s+\|\s+$/g, "").trim(),
     };
     state.places.push(place);
     WorldStore.recalcCountry(state, cid);
@@ -619,17 +636,19 @@ window.WorldPlanner = (() => {
     const segByCity = new Map((trip.segments || []).map((s) => [s.city, s]));
 
     function itemFromRow(row, countryId, countryName, city) {
+      const rowCity = (row.location || city || "Other").trim();
       const cat = PlaceCategorize.fromPlannerLabel(row.category) || PlaceCategorize.categorize(row.place, row.notes);
       const place = upsertPlaceFromItem(state, {
-        name: row.place, city: city || row.location, countryId, countryName,
-        category: cat, url: row.url, notes: row.notes,
+        name: row.place,
+        city: rowCity,
+        countryId,
+        countryName,
+        category: cat,
+        url: row.url,
+        notes: row.notes,
       });
-      let lat = place?.lat;
-      let lng = place?.lng;
-      if (row.url) {
-        const coords = WorldMapsImport?.parseCoordsFromUrl?.(row.url);
-        if (coords?.lat && coords?.lng) { lat = coords.lat; lng = coords.lng; }
-      }
+      const lat = place?.lat;
+      const lng = place?.lng;
       return {
         id: WorldStore.uid("item"),
         time: row.time || "",
@@ -645,13 +664,17 @@ window.WorldPlanner = (() => {
 
     if (draft.dayPlans?.length) {
       trip.days = draft.dayPlans.map((plan, i) => {
-        const seg = segByCity.get(plan.location) || trip.segments[0];
+        const planCity = plan.location || "Other";
+        const seg = segByCity.get(planCity) || trip.segments[0];
         const country = state.countries.find((c) => c.id === seg?.countryId);
-        const items = (plan.rows || []).map((row) =>
-          itemFromRow(row, seg?.countryId, country?.name, plan.location)
-        );
+        const items = (plan.rows || []).map((row) => {
+          const rowCity = (row.location || planCity || "Other").trim();
+          const rowSeg = segByCity.get(rowCity) || seg;
+          const rowCountry = state.countries.find((c) => c.id === rowSeg?.countryId);
+          return itemFromRow(row, rowSeg?.countryId, rowCountry?.name || country?.name, rowCity);
+        });
         return {
-          day: i + 1,
+          day: plan.day || (i + 1),
           date: plan.date,
           segmentId: seg?.id || null,
           items,
@@ -673,6 +696,7 @@ window.WorldPlanner = (() => {
     }
 
     WorldStore.recategorizePlaces(state);
+    WorldGlobe.updatePins?.(WorldStore.countriesForUi(state));
     return trip;
   }
 

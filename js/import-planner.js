@@ -105,6 +105,71 @@ window.WorldPlannerImport = (() => {
     return /\bguide\b/i.test(s) && !/\brestaurant|cafe|hotel\b/i.test(s);
   }
 
+  function escapeRe(s) {
+    return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function cleanPlaceName(place, { location, time, category } = {}) {
+    let p = norm(place);
+    if (!p) return "";
+
+    for (const lab of CATEGORY_LABELS) {
+      const re = new RegExp(`\\s+${escapeRe(lab)}\\s*$`, "i");
+      if (re.test(p)) {
+        p = p.replace(re, "").trim();
+        if (!category) category = lab;
+      }
+    }
+
+    if (location && location !== "Other") {
+      const loc = location.trim();
+      if (p.toLowerCase().startsWith(loc.toLowerCase())) {
+        p = p.slice(loc.length).trim();
+      } else {
+        const tail = loc.split(/\s+/).pop();
+        if (tail && tail.length > 2 && p.toLowerCase().startsWith(tail.toLowerCase())) {
+          p = p.slice(tail.length).trim();
+        }
+      }
+    }
+
+    if (time && isTimeOnly(time)) {
+      p = p.replace(new RegExp(`^${escapeRe(time)}\\s*`, "i"), "").trim();
+      p = p.replace(new RegExp(`\\b${escapeRe(time)}\\b`, "gi"), " ").replace(/\s+/g, " ").trim();
+    }
+
+    for (const lab of CATEGORY_LABELS) {
+      const re = new RegExp(`\\s+${escapeRe(lab)}\\s*$`, "i");
+      p = p.replace(re, "").trim();
+    }
+
+    return p.replace(/\s+Map\s*$/i, "").trim();
+  }
+
+  function finalizeActivityFields({ place, location, time, notes, category, url }) {
+    let cat = norm(category);
+    let name = cleanPlaceName(place, { location, time, category: cat });
+    let note = norm(notes);
+    let t = isTimeOnly(time) ? norm(time) : "";
+
+    if (!name && note && !isCategoryLabel(note)) {
+      name = cleanPlaceName(note, { location, time, category: cat });
+      note = "";
+    }
+    if (!cat && place && isCategoryLabel(place)) cat = place;
+    if (isCategoryLabel(name)) return null;
+    if (!name) return null;
+
+    return {
+      place: name,
+      location: cleanCity(location) || "Other",
+      time: t,
+      notes: note,
+      category: cat,
+      url: /^https?:\/\//i.test(url) ? url : "",
+    };
+  }
+
   function normalizeRow(row, fallbackLocation, ctx = {}) {
     const rawDate = norm(row.date);
     if (rawDate && !parsePlannerDate(rawDate) && (isCategoryLabel(rawDate) || HEADER_CELL.test(rawDate))) {
@@ -166,16 +231,19 @@ window.WorldPlannerImport = (() => {
       };
     }
 
+    const finalized = finalizeActivityFields({ place, location, time, notes, category, url });
+    if (!finalized) return null;
+
     return {
       type: "activity",
       date,
       day,
-      location: location.replace(/\s+/g, " "),
-      time,
-      place: place || notes || "Activity",
-      notes: place && notes ? notes : "",
-      category,
-      url: isUrl(url) ? url : "",
+      location: finalized.location.replace(/\s+/g, " "),
+      time: finalized.time,
+      place: finalized.place,
+      notes: finalized.notes,
+      category: finalized.category,
+      url: finalized.url,
     };
   }
 
@@ -316,8 +384,12 @@ window.WorldPlannerImport = (() => {
   }
 
   function cellForColumn(cells, col) {
-    const hit = cells.find((c) => c.x >= col.x0 && c.x < col.x1);
-    return hit?.str || "";
+    return cells
+      .filter((c) => c.x >= col.x0 && c.x < col.x1)
+      .sort((a, b) => a.x - b.x)
+      .map((c) => c.str)
+      .join(" ")
+      .trim();
   }
 
   function rowFromPdfColumns(cells, columns, fallbackLocation, ctx) {
@@ -408,15 +480,33 @@ window.WorldPlannerImport = (() => {
     return { rows, guides };
   }
 
+  function rowQuality(r) {
+    if (!r || r.type === "guide") return 0;
+    let score = 0;
+    if (r.date) score += 5;
+    if (r.day) score += 2;
+    if (r.location && cleanCity(r.location)) score += 5;
+    if (r.time && isTimeOnly(r.time)) score += 4;
+    if (r.category && isCategoryLabel(r.category)) score += 6;
+    if (r.place && !isCategoryLabel(r.place)) score += 12;
+    if (r.url) score += 3;
+    if (r.place && isCategoryLabel(r.place)) score -= 25;
+    if (r.place && /\b(transportation|food & dining|sightseeing|nightlife|coffee & snacks)\b/i.test(r.place)) score -= 20;
+    if (r.place && (r.place.split(/\s+/).length > 14)) score -= 15;
+    if (r.place && r.location && r.place.toLowerCase().includes(r.location.toLowerCase())) score -= 8;
+    return score;
+  }
+
   function pickBestParse(candidates) {
     const scored = candidates
       .filter((c) => c && (c.rows?.length || 0) > 0)
-      .map((c) => ({
-        ...c,
-        score: (c.rows?.length || 0) * 10
-          + (c.rows?.filter((r) => r.date).length || 0) * 5
-          + (c.rows?.filter((r) => r.url).length || 0) * 2,
-      }))
+      .map((c) => {
+        const q = (c.rows || []).reduce((sum, r) => sum + rowQuality(r), 0);
+        return {
+          ...c,
+          score: q + (c.rows?.length || 0) * 2,
+        };
+      })
       .sort((a, b) => b.score - a.score);
     return scored[0] || { rows: [], guides: [], title: "" };
   }
@@ -584,10 +674,13 @@ window.WorldPlannerImport = (() => {
 
   function locationCountryHint(location) {
     const n = String(location || "").toLowerCase();
-    if (/niagara|washington|new york|nyc|jersey|boston|chicago|miami|los angeles|san francisco|las vegas/.test(n)) {
+    if (/niagara|washington|new york|nyc|manhattan|brooklyn|jersey|boston|chicago|miami|los angeles|san francisco|las vegas|seattle|philadelphia|orlando|austin|denver|portland|honolulu/.test(n)) {
       return "United States";
     }
-    return "";
+    if (/buenos aires|patagonia|mendoza|bariloche|iguazu/.test(n)) return "Argentina";
+    if (/london|manchester|edinburgh/.test(n)) return "United Kingdom";
+    if (/paris|lyon|nice|marseille/.test(n)) return "France";
+    if (/rome|milan|venice|florence|naples/.test(n)) return "Italy";
   }
 
   function buildTripDraft(parsed) {
