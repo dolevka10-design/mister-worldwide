@@ -6,6 +6,11 @@ window.WorldPlannerImport = (() => {
   function norm(s) { return String(s || "").trim(); }
   function slug(name) { return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
 
+  const CATEGORY_LABELS = [
+    "Transportation / Flight", "Transportation", "Food & Dining", "Sightseeing / Attraction", "Sightseeing",
+    "Coffee & Snacks", "Accommodation", "Nightlife / Drinks", "Nightlife", "Guide / Info", "Guide", "Shopping", "Map",
+  ];
+
   function parsePlannerDate(s) {
     const t = norm(s).replace(/\s+/g, "");
     if (!t) return null;
@@ -26,7 +31,7 @@ window.WorldPlannerImport = (() => {
     const m = String(s || "").match(/day\s*(\d+)/i);
     if (m) return Number(m[1]);
     const n = parseInt(s, 10);
-    return Number.isFinite(n) ? n : null;
+    return Number.isFinite(n) && n > 0 && n < 400 ? n : null;
   }
 
   function headerKey(h) {
@@ -46,6 +51,11 @@ window.WorldPlannerImport = (() => {
     return /^https?:\/\//i.test(norm(s));
   }
 
+  function extractUrl(s) {
+    const m = String(s || "").match(/https?:\/\/[^\s)>\]]+/i);
+    return m ? m[0].replace(/[),.;]+$/g, "") : "";
+  }
+
   function looksLikeHeader(cells) {
     const j = cells.map((c) => String(c || "").toLowerCase()).join(" ");
     return /date/.test(j) && (/place|activity|location/.test(j) || /day/.test(j));
@@ -57,25 +67,61 @@ window.WorldPlannerImport = (() => {
     return row;
   }
 
-  function normalizeRow(row, fallbackLocation) {
-    const date = parsePlannerDate(row.date);
-    const day = parseDayNum(row.day);
-    const location = norm(row.location) || fallbackLocation || "";
-    const time = norm(row.time);
-    const place = norm(row.place);
-    const notes = norm(row.notes);
-    const category = norm(row.category);
-    let url = norm(row.url);
-    if (url && !isUrl(url) && /^map$/i.test(url)) url = "";
+  function isTimeOnly(s) {
+    return /^\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?$/.test(norm(s));
+  }
+
+  function isGuideTitle(s) {
+    return /\bguide\b/i.test(s) && !/\brestaurant|cafe|hotel\b/i.test(s);
+  }
+
+  function normalizeRow(row, fallbackLocation, ctx = {}) {
+    let date = parsePlannerDate(row.date) || ctx.date || null;
+    let day = parseDayNum(row.day) ?? ctx.day ?? null;
+    let location = norm(row.location) || ctx.location || fallbackLocation || "";
+    let time = norm(row.time);
+    let place = norm(row.place);
+    let notes = norm(row.notes);
+    let category = norm(row.category);
+    let url = extractUrl(row.url) || extractUrl(place) || extractUrl(notes) || extractUrl(row.col_extra || "");
+
+    if (isTimeOnly(place) && !time) {
+      time = place;
+      place = "";
+    }
+    if (!place && isTimeOnly(notes)) {
+      time = time || notes;
+      notes = "";
+    }
+    if (!place && notes && !isTimeOnly(notes)) {
+      place = notes;
+      notes = "";
+    }
+
+    if (url && place.includes(url)) place = place.replace(url, "").trim();
+    place = place.replace(/\s+Map\s*$/i, "").trim();
+
     if (!place && !notes && !time) return null;
     if (!place && !location) return null;
+    if (/^(day|date|location|time|place|notes|category)$/i.test(place)) return null;
+
+    if (isGuideTitle(place) || /^guide\s*\/\s*info$/i.test(category)) {
+      return {
+        type: "guide",
+        title: place,
+        body: notes || "",
+        city: location || ctx.location || fallbackLocation || "",
+      };
+    }
+
     return {
+      type: "activity",
       date,
       day,
       location: location.replace(/\s+/g, " "),
       time,
       place: place || notes || "Activity",
-      notes: place ? notes : "",
+      notes: place && notes ? notes : "",
       category,
       url: isUrl(url) ? url : "",
     };
@@ -109,11 +155,12 @@ window.WorldPlannerImport = (() => {
     const rows = [];
     const guides = [];
     let guideBuf = null;
+    let ctx = { date: null, day: null, location: "" };
 
     for (const line of lines) {
       if (/itinerary/i.test(line) && !line.includes(delim === "\t" ? "\t" : ",")) {
         const loc = line.replace(/itinerary/i, "").trim();
-        if (loc) fallbackLocation = loc;
+        if (loc) { fallbackLocation = loc; ctx.location = loc; }
         if (!title) title = line.trim();
         continue;
       }
@@ -134,11 +181,16 @@ window.WorldPlannerImport = (() => {
       }
       if (!keys) continue;
       const raw = rowFromCells(keys, cells);
-      const row = normalizeRow(raw, fallbackLocation);
-      if (row) {
-        if (row.location) fallbackLocation = row.location;
-        rows.push(row);
+      const row = normalizeRow(raw, fallbackLocation, ctx);
+      if (!row) continue;
+      if (row.type === "guide") {
+        guides.push({ title: row.title, body: row.body, city: row.city || fallbackLocation });
+        continue;
       }
+      if (row.date) ctx.date = row.date;
+      if (row.day) ctx.day = row.day;
+      if (row.location) { fallbackLocation = row.location; ctx.location = row.location; }
+      rows.push(row);
     }
     if (guideBuf) guides.push(guideBuf);
     return { rows, guides, title };
@@ -156,6 +208,7 @@ window.WorldPlannerImport = (() => {
       if (!json.length) continue;
       let keys = null;
       let fallbackLocation = /overview|planner|total/i.test(name) ? "" : name.replace(/itinerary/i, "").trim();
+      let ctx = { date: null, day: null, location: fallbackLocation };
       if (/guide|transit|transport|getting/i.test(name)) {
         const text = json.map((r) => r.filter(Boolean).join(" ")).join("\n");
         if (text.trim()) guides.push({ title: name, body: text.trim(), city: fallbackLocation });
@@ -181,31 +234,72 @@ window.WorldPlannerImport = (() => {
             if (d) raw.date = `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
           }
         }
-        const row = normalizeRow(raw, fallbackLocation);
-        if (row) {
-          if (row.location) fallbackLocation = row.location;
-          rows.push(row);
+        const row = normalizeRow(raw, fallbackLocation, ctx);
+        if (!row) continue;
+        if (row.type === "guide") {
+          guides.push({ title: row.title, body: row.body, city: row.city || fallbackLocation });
+          continue;
         }
+        if (row.date) ctx.date = row.date;
+        if (row.day) ctx.day = row.day;
+        if (row.location) { fallbackLocation = row.location; ctx.location = row.location; }
+        rows.push(row);
       }
     }
     return { rows, guides, title: String(title).replace(/itinerary/i, "").trim() || "Imported trip" };
+  }
+
+  function detectColumns(cells) {
+    const cols = cells
+      .filter((c) => c.str && !/^\s*$/.test(c.str))
+      .sort((a, b) => a.x - b.x);
+    if (!cols.length) return null;
+    const headerText = cols.map((c) => c.str.toLowerCase()).join(" ");
+    if (!/date/.test(headerText) || !/place|activity|location|day/.test(headerText)) return null;
+    return cols.map((c, i) => ({
+      key: headerKey(c.str),
+      x0: i === 0 ? 0 : (cols[i - 1].x + c.x) / 2,
+      x1: i === cols.length - 1 ? 9999 : (c.x + cols[i + 1].x) / 2,
+    }));
+  }
+
+  function cellForColumn(cells, col) {
+    const hit = cells.find((c) => c.x >= col.x0 && c.x < col.x1);
+    return hit?.str || "";
+  }
+
+  function rowFromPdfColumns(cells, columns, fallbackLocation, ctx) {
+    const raw = {};
+    for (const col of columns) raw[col.key] = norm(cellForColumn(cells, col));
+    const extras = cells
+      .filter((c) => !columns.some((col) => c.x >= col.x0 && c.x < col.x1))
+      .map((c) => c.str)
+      .join(" ");
+    if (extras) raw.col_extra = extras;
+    return normalizeRow(raw, fallbackLocation, ctx);
   }
 
   async function parsePdf(file) {
     if (typeof pdfjsLib === "undefined") throw new Error("PDF library not loaded");
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    const allLines = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
+    const rows = [];
+    const guides = [];
+    let title = "";
+    let columns = null;
+    let fallbackLocation = "";
+    let ctx = { date: null, day: null, location: "" };
+
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
       const content = await page.getTextContent();
       const buckets = [];
       for (const it of content.items || []) {
         const str = norm(it.str);
         if (!str) continue;
         const x = it.transform?.[4] ?? 0;
-        const y = Math.round((it.transform?.[5] ?? 0) / 3) * 3;
-        let row = buckets.find((b) => Math.abs(b.y - y) < 5);
+        const y = Math.round((it.transform?.[5] ?? 0) / 2) * 2;
+        let row = buckets.find((b) => Math.abs(b.y - y) < 4);
         if (!row) {
           row = { y, cells: [] };
           buckets.push(row);
@@ -213,18 +307,67 @@ window.WorldPlannerImport = (() => {
         row.cells.push({ x, str });
       }
       buckets.sort((a, b) => b.y - a.y);
+
       for (const row of buckets) {
         row.cells.sort((a, b) => a.x - b.x);
-        allLines.push(row.cells.map((c) => c.str).join("\t"));
+        const line = row.cells.map((c) => c.str).join(" ");
+        if (/trip planner/i.test(line) && !title) title = line.replace(/total days.*/i, "").trim();
+        if (/itinerary/i.test(line) && row.cells.length <= 3) {
+          fallbackLocation = line.replace(/itinerary/i, "").trim() || fallbackLocation;
+          ctx.location = fallbackLocation;
+          continue;
+        }
+        if (!columns) {
+          const detected = detectColumns(row.cells);
+          if (detected) {
+            columns = detected;
+            continue;
+          }
+        }
+        if (columns) {
+          const parsed = rowFromPdfColumns(row.cells, columns, fallbackLocation, ctx);
+          if (!parsed) continue;
+          if (parsed.type === "guide") {
+            guides.push({ title: parsed.title, body: parsed.body, city: parsed.city || fallbackLocation });
+            continue;
+          }
+          if (parsed.date) ctx.date = parsed.date;
+          if (parsed.day) ctx.day = parsed.day;
+          if (parsed.location) { fallbackLocation = parsed.location; ctx.location = parsed.location; }
+          rows.push(parsed);
+          continue;
+        }
       }
-      allLines.push("");
     }
-    const parsed = parseDelimited(allLines.join("\n"));
-    if (!parsed.rows.length) {
+
+    if (!rows.length) {
+      const allLines = [];
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        const buckets = [];
+        for (const it of content.items || []) {
+          const str = norm(it.str);
+          if (!str) continue;
+          const x = it.transform?.[4] ?? 0;
+          const y = Math.round((it.transform?.[5] ?? 0) / 3) * 3;
+          let row = buckets.find((b) => Math.abs(b.y - y) < 5);
+          if (!row) { row = { y, cells: [] }; buckets.push(row); }
+          row.cells.push({ x, str });
+        }
+        buckets.sort((a, b) => b.y - a.y);
+        for (const row of buckets) {
+          row.cells.sort((a, b) => a.x - b.x);
+          allLines.push(row.cells.map((c) => c.str).join("\t"));
+        }
+      }
+      const delimited = parseDelimited(allLines.join("\n"));
+      if (delimited.rows.length) return delimited;
       const loose = parsePdfLoose(allLines.join("\n"));
-      return { ...parsed, ...loose, rows: loose.rows.length ? loose.rows : parsed.rows };
+      return { rows: loose.rows, guides: [...guides, ...loose.guides], title: title || loose.title };
     }
-    return parsed;
+
+    return { rows, guides, title: title || "Imported trip" };
   }
 
   function parsePdfLoose(text) {
@@ -232,13 +375,16 @@ window.WorldPlannerImport = (() => {
     const guides = [];
     let location = "";
     let title = "";
+    let ctx = { date: null, day: null, location: "" };
     let guideBuf = null;
+
     for (const rawLine of String(text || "").split(/\n/)) {
       const line = rawLine.replace(/\s+/g, " ").trim();
       if (!line) continue;
       if (/trip planner/i.test(line) && !title) title = line.replace(/total days.*/i, "").trim();
-      if (/itinerary/i.test(line)) {
+      if (/itinerary/i.test(line) && !/\d{1,2}[./-]\d{1,2}/.test(line)) {
         location = line.replace(/itinerary/i, "").trim() || location;
+        ctx.location = location;
         continue;
       }
       if (/^\d+\.\s/.test(line) && /route|train|bus|airtrain|subway|direct/i.test(line)) {
@@ -250,30 +396,61 @@ window.WorldPlannerImport = (() => {
         guideBuf.body += (guideBuf.body ? "\n" : "") + line;
         continue;
       }
+
+      const parts = line.split("\t").map((s) => s.trim()).filter(Boolean);
+      if (parts.length >= 4) {
+        const raw = {
+          date: parts[0],
+          day: parts[1],
+          location: parts[2],
+          time: parts[3],
+          place: parts[4] || "",
+          notes: parts[5] || "",
+          category: parts[6] || "",
+          url: parts.slice(7).join(" ") || parts[6] || "",
+        };
+        const row = normalizeRow(raw, location, ctx);
+        if (row) {
+          if (row.type === "guide") guides.push({ title: row.title, body: row.body, city: row.city || location });
+          else {
+            if (row.date) ctx.date = row.date;
+            if (row.day) ctx.day = row.day;
+            if (row.location) { location = row.location; ctx.location = location; }
+            rows.push(row);
+          }
+          continue;
+        }
+      }
+
       const m = line.match(/^(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})\s+(?:Day\s*)?(\d+)?\s+([A-Za-z][A-Za-z .'-]+?)(?:\s+(\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?))?\s+(.*)$/i);
       if (!m) continue;
       const rest = m[5] || "";
-      const catMatch = rest.match(/\s+(Food & Dining|Sightseeing(?:\s*\/\s*Attraction)?|Coffee & Snacks|Accommodation|Nightlife(?:\s*\/\s*Drinks)?|Transportation(?:\s*\/\s*Flight)?|Guide(?:\s*\/\s*Info)?|Shopping|Map)\s*$/i);
-      let place = rest;
       let category = "";
-      if (catMatch) {
-        category = catMatch[1];
-        place = rest.slice(0, catMatch.index).replace(/\s+Map\s*$/i, "").trim();
+      let place = rest;
+      for (const lab of CATEGORY_LABELS) {
+        const re = new RegExp(`\\s+${lab.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+        if (re.test(rest)) {
+          category = lab;
+          place = rest.replace(re, "").replace(/\s+Map\s*$/i, "").trim();
+          break;
+        }
       }
-      place = place.replace(/\s+Map\s*$/i, "").trim();
+      const url = extractUrl(place) || extractUrl(rest);
+      if (url) place = place.replace(url, "").trim();
       const locGuess = (m[3] || location).trim();
       if (/^(day|date|location)$/i.test(locGuess)) continue;
-      rows.push({
-        date: parsePlannerDate(m[1]),
-        day: m[2] ? Number(m[2]) : null,
-        location: locGuess,
-        time: m[4] || "",
-        place: place || locGuess,
-        notes: "",
-        category,
-        url: "",
-      });
-      location = locGuess || location;
+      const row = normalizeRow({
+        date: m[1], day: m[2] ? `Day ${m[2]}` : "", location: locGuess,
+        time: m[4] || "", place, notes: "", category, url,
+      }, location, ctx);
+      if (!row) continue;
+      if (row.type === "guide") guides.push({ title: row.title, body: row.body, city: row.city || location });
+      else {
+        if (row.date) ctx.date = row.date;
+        if (row.day) ctx.day = row.day;
+        if (row.location) { location = row.location; ctx.location = location; }
+        rows.push(row);
+      }
     }
     if (guideBuf) guides.push(guideBuf);
     return { rows, guides, title };
@@ -300,26 +477,31 @@ window.WorldPlannerImport = (() => {
   }
 
   function buildTripDraft(parsed) {
-    const rows = (parsed.rows || []).filter((r) => r.place);
+    const rows = (parsed.rows || []).filter((r) => r.type !== "guide" && r.place);
     if (!rows.length) throw new Error("No itinerary rows found. Use columns: Date, Day, Location, Time, Place/Activity, Notes, Category, Maps URL");
-    const byLoc = new Map();
-    for (const r of rows) {
-      const loc = r.location || "Other";
-      if (!byLoc.has(loc)) byLoc.set(loc, []);
-      byLoc.get(loc).push(r);
-    }
+
+    rows.sort((a, b) => {
+      const da = a.date || "";
+      const db = b.date || "";
+      if (da !== db) return da.localeCompare(db);
+      return (a.day || 0) - (b.day || 0);
+    });
+
     const segments = [];
-    for (const [city, locRows] of byLoc) {
-      const dates = locRows.map((r) => r.date).filter(Boolean).sort();
-      segments.push({
-        city,
-        countryName: locationCountryHint(city),
-        startDate: dates[0] || null,
-        endDate: dates[dates.length - 1] || null,
-        rows: locRows,
-      });
+    let current = null;
+    for (const r of rows) {
+      const city = r.location || "Other";
+      const date = r.date || null;
+      if (!current || current.city !== city) {
+        current = { city, countryName: locationCountryHint(city), startDate: date, endDate: date, rows: [] };
+        segments.push(current);
+      } else {
+        if (date && (!current.startDate || date < current.startDate)) current.startDate = date;
+        if (date && (!current.endDate || date > current.endDate)) current.endDate = date;
+      }
+      current.rows.push(r);
     }
-    segments.sort((a, b) => String(a.startDate || "").localeCompare(String(b.startDate || "")));
+
     const allDates = rows.map((r) => r.date).filter(Boolean).sort();
     return {
       name: parsed.title || "Imported trip",

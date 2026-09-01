@@ -950,6 +950,45 @@ input[type="date"]::-webkit-date-and-time-value {
 .day-add { padding: 0.75rem; margin-top: 0.5rem; }
 .day-add-grid { display: grid; gap: 0.45rem; margin-top: 0.55rem; }
 .day-empty { padding: 0.5rem 0.25rem; }
+.day-map-bar { padding: 0.75rem; margin-bottom: 0.65rem; }
+.day-map-bar .btn { width: 100%; min-height: 44px; margin-bottom: 0.55rem; }
+.day-location-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.day-location-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.day-loc-num {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: rgba(124, 240, 255, 0.15);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.day-loc-name { font-size: 0.82rem; min-width: 0; }
+.globe-place-pin {
+  border: 2px solid var(--accent);
+  background: rgba(8, 12, 20, 0.92);
+  color: var(--accent);
+  border-radius: 999px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0.15rem 0.4rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.globe-place-num { display: block; line-height: 1; }
 .route-editor { margin: 0.75rem 0; padding: 0; overflow: hidden; }
 .route-editor-summary {
   cursor: pointer;

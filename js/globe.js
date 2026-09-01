@@ -243,12 +243,49 @@ window.WorldGlobe = (() => {
   }
 
   let pinsVisible = true;
+  let dayMode = false;
+  let savedPinMode = null;
+
+  function makePlacePin(d) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "globe-place-pin";
+    el.title = d.name;
+    el.setAttribute("aria-label", d.name);
+    el.innerHTML = `<span class="globe-place-num">${d.label || "📍"}</span>`;
+    return el;
+  }
+
+  function showDayPlaces(places) {
+    if (!globe) return;
+    const data = (places || [])
+      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+      .map((p, i) => ({ ...p, label: p.label || String(i + 1) }));
+    if (!data.length) return;
+    dayMode = true;
+    pinsVisible = true;
+    globe
+      .htmlElement((d) => makePlacePin(d))
+      .htmlElementsData(data);
+    const lat = data.reduce((s, p) => s + p.lat, 0) / data.length;
+    const lng = data.reduce((s, p) => s + p.lng, 0) / data.length;
+    const spread = Math.max(...data.map((p) => Math.hypot(p.lat - lat, p.lng - lng)), 0.5);
+    const altitude = Math.min(2.8, Math.max(1.4, 1.8 + spread * 0.35));
+    globe.pointOfView({ lat, lng, altitude }, 1200);
+  }
+
+  function restoreCountryPins() {
+    if (!globe || !dayMode) return;
+    dayMode = false;
+    globe.htmlElement((d) => makeFlagPin(d));
+    updatePins(countries);
+  }
 
   function setPinsVisible(visible) {
     pinsVisible = !!visible;
-    if (!globe) return;
+    if (!globe || dayMode) return;
     const data = pinsVisible ? pinData(countries) : [];
-    globe.htmlElementsData(data);
+    globe.htmlElement((d) => makeFlagPin(d)).htmlElementsData(data);
   }
 
   function bindControls(controls) {
@@ -341,9 +378,10 @@ window.WorldGlobe = (() => {
   function updatePins(list) {
     countries = (list || countries).filter((c) => (c.placeCount || 0) > 0);
     if (!globe) return;
+    if (dayMode) return;
     if (!pinsVisible) return;
     const data = pinData(countries);
-    globe.htmlElementsData(data);
+    globe.htmlElement((d) => makeFlagPin(d)).htmlElementsData(data);
   }
 
   function focusCountry(countryId) {
@@ -393,6 +431,8 @@ window.WorldGlobe = (() => {
     updatePins,
     focusCountry,
     focusPlace,
+    showDayPlaces,
+    restoreCountryPins,
     destroy,
     resize,
     isReady,
