@@ -32,6 +32,7 @@ window.WorldPlannerImport = (() => {
     const l = norm(row.location);
     const n = norm(row.notes);
     if (!p && !l) return true;
+    if (!p && l) return false;
     if (HEADER_CELL.test(p) || HEADER_CELL.test(l) || HEADER_CELL.test(n)) return true;
     if (/^place\/?activity$/i.test(p) || /^place\/?activity$/i.test(l)) return true;
     if (isCategoryLabel(p) && (!n || /^activity$/i.test(n) || HEADER_CELL.test(n)) && !row.time && !row.url) return true;
@@ -191,7 +192,20 @@ window.WorldPlannerImport = (() => {
     }
     if (!cat && place && isCategoryLabel(place)) cat = place;
     if (isCategoryLabel(name)) return null;
-    if (!name) return null;
+    if (!name) {
+      if (repaired.location) {
+        return {
+          place: "",
+          location: repaired.location,
+          time: t,
+          notes: note,
+          category: cat,
+          url,
+          placeholder: true,
+        };
+      }
+      return null;
+    }
 
     return {
       place: name,
@@ -247,15 +261,17 @@ window.WorldPlannerImport = (() => {
     if (url && place.includes(url)) place = place.replace(url, "").trim();
     place = place.replace(/\s+Map\s*$/i, "").trim();
 
-    if (!place && !notes && !time) return null;
-    if (!place && !location) return null;
-    if (HEADER_CELL.test(place) || HEADER_CELL.test(location)) return null;
-    if (isJunkRow({ place, location, notes, time, category, url })) return null;
-    if (isCategoryLabel(place)) return null;
+    const hasContext = !!(date || location || day);
+    if (!place && !notes && !time && !hasContext) return null;
+    if (!place && !location && !date) return null;
+    if (place && HEADER_CELL.test(place)) return null;
+    if (location && HEADER_CELL.test(location)) return null;
+    if (isJunkRow({ place, location, notes, time, category, url }) && place) return null;
+    if (place && isCategoryLabel(place) && !hasContext) return null;
 
-    location = cleanCity(location) || cleanCity(ctx.location) || cleanCity(fallbackLocation) || "Other";
+    location = cleanCity(location) || cleanCity(ctx.location) || cleanCity(fallbackLocation) || (hasContext ? "Other" : "");
 
-    if (isGuideTitle(place) || /^guide\s*\/\s*info$/i.test(category)) {
+    if (place && (isGuideTitle(place) || /^guide\s*\/\s*info$/i.test(category))) {
       return {
         type: "guide",
         title: place,
@@ -271,12 +287,13 @@ window.WorldPlannerImport = (() => {
       type: "activity",
       date,
       day,
-      location: finalized.location.replace(/\s+/g, " "),
+      location: (finalized.location || location || "Other").replace(/\s+/g, " "),
       time: finalized.time,
       place: finalized.place,
       notes: finalized.notes,
       category: finalized.category,
       url: finalized.url,
+      placeholder: !!finalized.placeholder,
     };
   }
 
@@ -476,10 +493,15 @@ window.WorldPlannerImport = (() => {
     return { allLines, pages, title };
   }
 
-  const ITINERARY_CITY = /new\s*york|niagara\s*falls|washington|boston|chicago|philadelphia|los\s*angeles|san\s*francisco|las\s*vegas|miami|seattle|austin|denver|portland|orlando|atlanta|dallas|houston|new\s*orleans|san\s*diego|vancouver|toronto|montreal|london|paris|rome|barcelona|amsterdam|berlin|tokyo|sydney|melbourne|buenos\s*aires/i;
+  const ITINERARY_CITY = /new\s*york|niagara\s*falls|washington|boston|chicago|philadelphia|los\s*angeles|san\s*francisco|las\s*vegas|miami|seattle|austin|denver|portland|orlando|atlanta|dallas|houston|new\s*orleans|san\s*diego|vancouver|toronto|montreal|london|paris|rome|barcelona|amsterdam|berlin|tokyo|sydney|melbourne|buenos\s*aires|istanbul|cappadocia|antalya|ankara|izmir|ephesus|pamukkale|bodrum|fethiye|göreme|goreme|kusadasi|trabzon|athens|santorini|mykonos|tel\s*aviv|jerusalem|amman|petra|cairo|dubai|bangkok|singapore/i;
 
   function cityFromItineraryLine(line) {
-    const raw = String(line || "").replace(/itinerary/gi, " ").trim();
+    const raw = String(line || "")
+      .replace(/trip\s*planner/gi, " ")
+      .replace(/itinerary/gi, " ")
+      .replace(/total\s*days.*/i, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     const known = [
       ["new york", "New York"],
       ["niagara falls", "Niagara Falls"],
@@ -490,6 +512,10 @@ window.WorldPlannerImport = (() => {
       ["new orleans", "New Orleans"],
       ["san diego", "San Diego"],
       ["buenos aires", "Buenos Aires"],
+      ["tel aviv", "Tel Aviv"],
+      ["kusadasi", "Kusadasi"],
+      ["göreme", "Goreme"],
+      ["goreme", "Goreme"],
     ];
     const lower = raw.toLowerCase();
     for (const [pat, name] of known) {
@@ -499,37 +525,53 @@ window.WorldPlannerImport = (() => {
     if (m) {
       return m[0].replace(/\s+/g, " ").replace(/\b\w+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
     }
+    if (raw && raw.split(/\s+/).length <= 5 && !HEADER_CELL.test(raw) && !/^\d/.test(raw)) {
+      return cleanCity(raw) || "";
+    }
     return cleanCity(raw) || "";
+  }
+
+  function isOverviewPage(page) {
+    const text = page.lines.map((l) => l.line).join(" ");
+    const dateRows = page.lines.filter((l) => /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(l.line)).length;
+    const hasHeader = page.lines.some((l) => looksLikeHeader(l.cells.map((c) => c.str)));
+    const hasItin = /itinerary/i.test(text);
+    if (hasHeader || hasItin || dateRows >= 1) return false;
+    return /total\s*days|table\s*of\s*contents|cover\s*page|getting\s*around\s*guide|party\s*in\s*the\s*usa\s*trip\s*planner/i.test(text);
   }
 
   function isItineraryPage(page) {
     const text = page.lines.map((l) => l.line).join(" ");
-    if (/itinerary/i.test(text) && ITINERARY_CITY.test(text)) return true;
+    if (/itinerary/i.test(text)) return true;
     if (page.lines.some((l) => looksLikeHeader(l.cells.map((c) => c.str)))) return true;
     const dateRows = page.lines.filter((l) =>
-      /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(l.line) && l.cells.length >= 3
+      /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(l.line) && l.cells.length >= 2
     ).length;
-    return dateRows >= 2;
+    return dateRows >= 1;
   }
 
   function isSkipPage(page) {
-    const text = page.lines.map((l) => l.line).join(" ").toLowerCase();
-    if (/total\s*days|party\s*in\s*the\s*usa\s*trip\s*planner|table\s*of\s*contents|cover\s*page|getting\s*around\s*guide/i.test(text)
-      && !/itinerary/i.test(text)) return true;
-    return !isItineraryPage(page);
+    return isOverviewPage(page);
   }
 
-  function parseLinesChunk(lines, fallbackLocation, titleOut) {
+  function parseLinesChunk(lines, fallbackLocation, titleOut, inheritedColumns = null, inheritedCtx = null) {
     const rows = [];
     const guides = [];
-    let columns = null;
-    let location = fallbackLocation || "";
-    let ctx = { date: null, day: null, location };
+    let columns = inheritedColumns;
+    let location = fallbackLocation || inheritedCtx?.location || "";
+    let ctx = {
+      date: inheritedCtx?.date || null,
+      day: inheritedCtx?.day || null,
+      location,
+    };
     for (const { cells, line } of lines) {
       if (/trip planner/i.test(line) && !titleOut.value) titleOut.value = line.replace(/total days.*/i, "").trim();
-      if (/itinerary/i.test(line) && ITINERARY_CITY.test(line)) {
-        location = cityFromItineraryLine(line) || location;
-        ctx.location = location;
+      if (/itinerary/i.test(line) && cells.length <= 5) {
+        const city = cityFromItineraryLine(line);
+        if (city) {
+          location = city;
+          ctx.location = location;
+        }
         continue;
       }
       if (looksLikeHeader(cells.map((c) => c.str))) {
@@ -552,18 +594,25 @@ window.WorldPlannerImport = (() => {
       if (parsed.location) { location = parsed.location; ctx.location = parsed.location; }
       rows.push(parsed);
     }
-    return { rows, guides };
+    return { rows, guides, columns, location, ctx };
   }
 
   function parseItineraryPages(pages, docTitle) {
     const rows = [];
     const guides = [];
     const titleOut = { value: docTitle || "" };
+    let sharedColumns = null;
+    let lastLocation = "";
+    let sharedCtx = { date: null, day: null, location: "" };
     for (const page of pages) {
       if (isSkipPage(page)) continue;
-      const header = page.lines.find((l) => /itinerary/i.test(l.line) && ITINERARY_CITY.test(l.line));
-      const fallbackLocation = header ? cityFromItineraryLine(header.line) : "";
-      const chunk = parseLinesChunk(page.lines, fallbackLocation, titleOut);
+      const header = page.lines.find((l) => /itinerary/i.test(l.line) && l.cells.length <= 5);
+      if (header) lastLocation = cityFromItineraryLine(header.line) || lastLocation;
+      if (!isItineraryPage(page) && !sharedColumns) continue;
+      const chunk = parseLinesChunk(page.lines, lastLocation, titleOut, sharedColumns, sharedCtx);
+      if (chunk.columns) sharedColumns = chunk.columns;
+      if (chunk.location) lastLocation = chunk.location;
+      if (chunk.ctx) sharedCtx = { date: chunk.ctx.date || null, day: chunk.ctx.day || null, location: lastLocation };
       rows.push(...chunk.rows);
       guides.push(...chunk.guides);
     }
@@ -642,9 +691,10 @@ window.WorldPlannerImport = (() => {
       .filter((c) => c && (c.rows?.length || 0) > 0)
       .map((c) => {
         const q = (c.rows || []).reduce((sum, r) => sum + rowQuality(r), 0);
+        const locs = new Set((c.rows || []).map((r) => r.location).filter(Boolean));
         return {
           ...c,
-          score: q + (c.rows?.length || 0) * 2,
+          score: q + (c.rows?.length || 0) * 2 + locs.size * 25,
         };
       })
       .sort((a, b) => b.score - a.score);
@@ -803,8 +853,44 @@ window.WorldPlannerImport = (() => {
     return { rows, guides, title };
   }
 
+  async function parseZip(file) {
+    if (typeof JSZip === "undefined") throw new Error("ZIP library not loaded");
+    const zip = await JSZip.loadAsync(file);
+    const merged = { rows: [], guides: [], title: String(file?.name || "Imported trip").replace(/\.zip$/i, "") };
+    const names = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+    for (const path of names) {
+      const lower = path.toLowerCase();
+      const entry = zip.files[path];
+      try {
+        if (lower.endsWith(".csv") || lower.endsWith(".tsv") || lower.endsWith(".txt")) {
+          const text = await entry.async("string");
+          const parsed = parseDelimited(text);
+          merged.rows.push(...(parsed.rows || []));
+          merged.guides.push(...(parsed.guides || []));
+          if (parsed.title && merged.title === String(file?.name || "").replace(/\.zip$/i, "")) merged.title = parsed.title;
+        } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+          const buf = await entry.async("arraybuffer");
+          const parsed = parseXlsx(buf);
+          merged.rows.push(...(parsed.rows || []));
+          merged.guides.push(...(parsed.guides || []));
+        } else if (lower.endsWith(".pdf")) {
+          const blob = await entry.async("blob");
+          const pdfFile = new File([blob], path.split("/").pop() || "itinerary.pdf", { type: "application/pdf" });
+          const parsed = await parsePdf(pdfFile);
+          merged.rows.push(...(parsed.rows || []));
+          merged.guides.push(...(parsed.guides || []));
+        }
+      } catch (e) {
+        console.warn("ZIP entry failed", path, e);
+      }
+    }
+    if (!merged.rows.length) throw new Error("No itinerary CSV/PDF/Excel found in the ZIP");
+    return merged;
+  }
+
   async function parseFile(file) {
     const name = String(file?.name || "").toLowerCase();
+    if (name.endsWith(".zip")) return parseZip(file);
     if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
       return parseXlsx(await file.arrayBuffer());
     }
@@ -815,8 +901,19 @@ window.WorldPlannerImport = (() => {
     return parseDelimited(text);
   }
 
-  function locationCountryHint(location) {
-    const n = String(location || "").toLowerCase();
+  const COUNTRY_ISO = {
+    turkey: "tr", "united states": "us", usa: "us", israel: "il", greece: "gr",
+    argentina: "ar", "united kingdom": "gb", uk: "gb", france: "fr", italy: "it",
+    spain: "es", germany: "de", japan: "jp", canada: "ca", australia: "au",
+    jordan: "jo", egypt: "eg", "united arab emirates": "ae", thailand: "th",
+    singapore: "sg", brazil: "br", mexico: "mx", morocco: "ma", portugal: "pt",
+  };
+
+  function locationCountryHint(location, title) {
+    const n = `${location || ""} ${title || ""}`.toLowerCase();
+    if (/istanbul|cappadocia|antalya|ankara|izmir|ephesus|pamukkale|bodrum|fethiye|goreme|göreme|kusadasi|trabzon|bursa|konya|gallipoli|canakkale|alanya|marmaris|oludeniz|kas |mardin|gaziantep|safranbolu|turkey|türkiye|turkiye/.test(n)) {
+      return "Turkey";
+    }
     if (/niagara|washington|new york|nyc|manhattan|brooklyn|jersey|boston|chicago|miami|los angeles|san francisco|las vegas|seattle|philadelphia|orlando|austin|denver|portland|honolulu/.test(n)) {
       return "United States";
     }
@@ -824,20 +921,36 @@ window.WorldPlannerImport = (() => {
     if (/london|manchester|edinburgh/.test(n)) return "United Kingdom";
     if (/paris|lyon|nice|marseille/.test(n)) return "France";
     if (/rome|milan|venice|florence|naples/.test(n)) return "Italy";
+    if (/athens|santorini|mykonos|crete|thessaloniki/.test(n)) return "Greece";
+    if (/tel aviv|jerusalem|haifa|eilat/.test(n)) return "Israel";
+    if (/amman|petra|wadi rum/.test(n)) return "Jordan";
+    if (/cairo|luxor|giza|aswan/.test(n)) return "Egypt";
+    if (/dubai|abu dhabi/.test(n)) return "United Arab Emirates";
+    if (/tokyo|kyoto|osaka/.test(n)) return "Japan";
+    if (/barcelona|madrid|seville/.test(n)) return "Spain";
+    if (/bangkok|phuket|chiang mai/.test(n)) return "Thailand";
+    if (/singapore/.test(n)) return "Singapore";
+    return "";
+  }
+
+  function countryIso(name) {
+    return COUNTRY_ISO[String(name || "").toLowerCase()] || String(name || "xx").slice(0, 2).toLowerCase();
   }
 
   function buildTripDraft(parsed) {
     const rows = (parsed.rows || [])
-      .filter((r) => r.type !== "guide" && r.place && !isJunkRow(r));
+      .map((r, i) => ({ ...r, _ord: i }))
+      .filter((r) => r.type !== "guide" && (r.place || r.placeholder || r.location) && !isJunkRow(r));
     if (!rows.length) throw new Error("No itinerary rows found. Use columns: Date, Day, Location, Time, Place/Activity, Notes, Category, Maps URL");
 
     rows.sort((a, b) => {
       const da = a.date || "";
       const db = b.date || "";
       if (da !== db) return da.localeCompare(db);
-      return String(a.time || "").localeCompare(String(b.time || ""));
+      return (a._ord || 0) - (b._ord || 0);
     });
 
+    const title = parsed.title || "";
     const segments = [];
     let current = null;
     let lastCity = "";
@@ -847,7 +960,7 @@ window.WorldPlannerImport = (() => {
       const city = loc || lastCity || "Other";
       const date = r.date || null;
       if (!current || current.city !== city) {
-        current = { city, countryName: locationCountryHint(city), startDate: date, endDate: date, rows: [] };
+        current = { city, countryName: locationCountryHint(city, title), startDate: date, endDate: date, rows: [] };
         segments.push(current);
       } else {
         if (date && (!current.startDate || date < current.startDate)) current.startDate = date;
@@ -857,27 +970,66 @@ window.WorldPlannerImport = (() => {
     }
 
     const dayPlans = [];
-    const byDate = new Map();
+    const dated = new Map();
+    const undated = new Map();
     lastCity = "";
-    for (const r of rows) {
-      const date = r.date;
-      if (!date) continue;
-      const loc = cleanCity(r.location) || lastCity || "Other";
-      if (cleanCity(r.location)) lastCity = loc;
-      if (!byDate.has(date)) {
-        byDate.set(date, {
-          date,
-          day: r.day || null,
-          location: loc,
-          rows: [],
-        });
-      }
-      const plan = byDate.get(date);
+
+    function addRowToPlan(plan, r, loc) {
       if (r.day && !plan.day) plan.day = r.day;
-      if (cleanCity(r.location)) plan.location = loc;
+      if (r.date && !plan.date) plan.date = r.date;
+      if (!plan.locations.includes(loc)) plan.locations.push(loc);
+      plan.location = plan.locations.join(" · ");
       plan.rows.push({ ...r, location: loc });
     }
-    for (const date of [...byDate.keys()].sort()) dayPlans.push(byDate.get(date));
+
+    for (const r of rows) {
+      const loc = cleanCity(r.location) || lastCity || "Other";
+      if (cleanCity(r.location)) lastCity = loc;
+      const fresh = () => ({
+        date: r.date || null,
+        day: r.day || null,
+        location: loc,
+        locations: [],
+        rows: [],
+      });
+      if (r.date) {
+        if (!dated.has(r.date)) dated.set(r.date, fresh());
+        addRowToPlan(dated.get(r.date), r, loc);
+      } else if (r.day) {
+        const k = String(r.day);
+        if (!undated.has(k)) undated.set(k, fresh());
+        addRowToPlan(undated.get(k), r, loc);
+      } else {
+        const k = `_ord-${r._ord}`;
+        if (!dated.has(k)) dated.set(k, fresh());
+        addRowToPlan(dated.get(k), r, loc);
+      }
+    }
+    for (const [dayKey, plan] of undated) {
+      const match = [...dated.values()].find((p) => String(p.day || "") === String(plan.day || dayKey));
+      if (match) {
+        for (const loc of plan.locations) {
+          if (!match.locations.includes(loc)) match.locations.push(loc);
+        }
+        match.location = match.locations.join(" · ");
+        match.rows.push(...plan.rows);
+        match.rows.sort((a, b) => (a._ord || 0) - (b._ord || 0));
+      } else {
+        dated.set(`day-${dayKey}`, plan);
+      }
+    }
+    const ordered = [...dated.values()].sort((a, b) => {
+      const da = a.date || "";
+      const db = b.date || "";
+      if (da && db && da !== db) return da.localeCompare(db);
+      if (da && !db) return -1;
+      if (!da && db) return 1;
+      return (a.day || 0) - (b.day || 0);
+    });
+    for (const plan of ordered) {
+      plan.rows.sort((a, b) => (a._ord || 0) - (b._ord || 0));
+      dayPlans.push(plan);
+    }
 
     const allDates = dayPlans.map((d) => d.date).filter(Boolean).sort();
     return {
@@ -891,5 +1043,8 @@ window.WorldPlannerImport = (() => {
     };
   }
 
-  return { parseFile, parseDelimited, parseXlsx, parsePdf, parseItineraryPages, buildTripDraft, parsePlannerDate, headerKey };
+  return {
+    parseFile, parseDelimited, parseXlsx, parsePdf, parseItineraryPages, buildTripDraft,
+    parsePlannerDate, headerKey, locationCountryHint, countryIso, cityFromItineraryLine,
+  };
 })();

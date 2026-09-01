@@ -15,7 +15,7 @@ Key files:
 | `js/store.js` | Seed places + **compact** local/cloud user data |
 | `js/cloud.js` | Firestore save/load (compact payload only) |
 | `js/app.js` | Shell, persist flags, country panel, day-on-globe |
-| `index.html` | Modals: activity detail, **delete trip confirm**, add-to-trip |
+| `index.html` | Modals: activity detail, **delete trip confirm**, **import summary**, add-to-trip |
 | `css/styles.css` | Planner/day/activity/modal styles |
 | `data/places.json` | ~6.3k seed places (~2.5MB). **Never write this to Firestore.** |
 
@@ -74,8 +74,8 @@ Correct:
 
 - Sequential day index (`days[0]` = Day 1). PDF “Day 4” is `importDay`, shown as extra text only.
 - Date chips: horizontal scroll (`touch-action: pan-x`). Swipe is not a tap (`touchTrack.moved`).
-- **Categories** vs **Timeline** (`trip.dayListMode`). Timeline = PDF row order, numbered, **↑ ↓** to reorder (`item-up` / `item-down` → `moveItem`).
-- Each row: activity name (+ time), **Maps** link next to **ⓘ**. Only ⓘ opens the detail popup (date, city, notes, etc.).
+- **Categories** vs **Timeline** (`trip.dayListMode`). Timeline = PDF row order, numbered. **Long-press the 3 dotted lines** on the left of a row, then drag up/down (hovering ghost). Drop persists `day.items` (`applyItemOrder`). Same handle in Categories, reordering within that category group.
+- Each row: grip · activity name (+ city if the day has more than one) · time · **Maps** · **ⓘ**. Only ⓘ opens the detail popup (date, city, notes, link).
 - **Map this day on globe**: close planner, `WorldGlobe.showDayPlaces`, `WorldApp.showDayPlacesOnCountry` (country panel filtered to that day’s `placeId`s).
 
 ## Delete trip
@@ -85,11 +85,20 @@ Correct:
 - Both open `#trip-delete-modal` (Cancel / Delete). No `window.confirm`.
 - After delete: go to trip **list** (or create if none left), persist + cloud flush.
 
-## PDF import
+## PDF / CSV / ZIP import
 
-`parseItineraryPages` in `js/import-planner.js`: only **itinerary section pages** (e.g. New York, Niagara Falls, Washington). Skip overview / total-days pages. Re-import after parser changes.
+`parseItineraryPages` in `js/import-planner.js`:
+
+- Keep **itinerary pages** (city header, table header, or dated rows). Skip cover / table-of-contents / total-days pages that have **no** dates or itinerary table.
+- **Continuation pages** (no header) reuse the previous page’s columns + city + date/day.
+- Same **date** (or same day number when a date is missing) across pages → **one day** with **all cities** (`Istanbul · Cappadocia`) and **all rows**, including **empty placeholder** activity rows.
+- Cities such as Istanbul / Cappadocia map to **Turkey** (`locationCountryHint` + `countryIso`). Missing countries are **created** and persisted as `extraCountries`. Maps URLs and planner categories are stored on the place.
+- Accepts `.xlsx`, `.xls`, `.csv`, `.pdf`, **`.zip`** (CSV/PDF/Excel inside).
+- After import, `#import-summary-modal` lists each city · country · activity count, with **OK** and **Close**.
 
 Tests: `node scripts/test-import-planner.js`
+
+Re-import after parser changes (delete the old trip first).
 
 ## Buttons on mobile
 

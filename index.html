@@ -122,7 +122,7 @@
     </div>
 
     <aside id="planner-panel" class="planner-panel" hidden></aside>
-    <input id="planner-import-file" class="sr-file" type="file" accept=".xlsx,.xls,.csv,.pdf,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+    <input id="planner-import-file" class="sr-file" type="file" accept=".xlsx,.xls,.csv,.pdf,.zip,application/pdf,application/zip,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
     <aside id="import-panel" class="import-panel" hidden></aside>
 
     <!-- AI Assistant -->
@@ -183,6 +183,18 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="tdm-cancel">Cancel</button>
           <button type="button" class="btn btn-primary" id="tdm-confirm">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="import-summary-modal" class="modal-overlay" hidden>
+      <div class="modal card import-summary-modal" role="dialog" aria-labelledby="ism-title">
+        <h3 id="ism-title">Locations added</h3>
+        <p class="muted" id="ism-lead"></p>
+        <ul class="import-summary-list" id="ism-list"></ul>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="ism-close">Close</button>
+          <button type="button" class="btn btn-primary" id="ism-ok">OK</button>
         </div>
       </div>
     </div>

@@ -21,6 +21,8 @@ window.CountryMeta = {
     Brazil: "Brazil",
     Chile: "Chile",
     Netherlands: "Netherlands",
+    Turkey: "Turkey",
+    Türkiye: "Turkey",
   },
 
   /** Manual pin centers where atlas match fails (lat, lng) */
@@ -43,6 +45,10 @@ window.CountryMeta = {
     thailand: { lat: 15.87, lng: 100.9925 },
     singapore: { lat: 1.3521, lng: 103.8198 },
     australia: { lat: -25.2744, lng: 133.7751 },
+    turkey: { lat: 39.0, lng: 35.2433 },
+    greece: { lat: 39.0742, lng: 21.8243 },
+    jordan: { lat: 31.24, lng: 36.51 },
+    egypt: { lat: 26.8206, lng: 30.8025 },
   },
 
   init(countries) {

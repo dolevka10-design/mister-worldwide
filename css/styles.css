@@ -789,6 +789,27 @@ input[type="date"]::-webkit-date-and-time-value {
 .modal-fields { display: grid; gap: 0.5rem; margin: 0.75rem 0; }
 .modal-fields .field span { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 0.2rem; }
 .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.import-summary-modal { width: min(100%, 24rem); }
+.import-summary-list {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  max-height: 50dvh;
+  overflow-y: auto;
+}
+.import-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+.import-summary-row strong { flex-shrink: 0; font-size: 0.78rem; }
 .tam-place-name { margin: 0 0 0.5rem; font-size: 0.85rem; }
 
 /* Multi-country create */
@@ -978,12 +999,12 @@ input[type="date"]::-webkit-date-and-time-value {
 .activity-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
   flex: 1;
   min-width: 0;
   min-height: 44px;
-  padding: 0.45rem 0.55rem;
+  padding: 0.45rem 0.55rem 0.45rem 0.35rem;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.02);
@@ -991,6 +1012,31 @@ input[type="date"]::-webkit-date-and-time-value {
   font: inherit;
   text-align: left;
 }
+.activity-row.is-placeholder .activity-row-text { font-weight: 500; color: var(--muted); font-style: italic; }
+.activity-drag-handle {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  width: 32px;
+  min-width: 32px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.activity-drag-handle span {
+  display: block;
+  width: 16px;
+  border-top: 2px dotted var(--muted);
+}
+.activity-drag-handle:active { cursor: grabbing; }
 .activity-row-detail {
   flex-shrink: 0;
   width: 36px;
@@ -1030,6 +1076,18 @@ input[type="date"]::-webkit-date-and-time-value {
   touch-action: manipulation;
 }
 .activity-row-move:disabled { opacity: 0.35; }
+.activity-drag-ghost {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  transform: scale(1.03);
+  opacity: 0.96;
+  background: var(--bg-elevated, #16161e);
+  border: 1px solid var(--accent);
+  pointer-events: none;
+}
+.activity-row.is-drop-placeholder,
+.activity-timeline-row.is-drop-placeholder {
+  opacity: 0.35;
+}
 .activity-row-maps {
   display: inline-flex;
   align-items: center;
@@ -1062,6 +1120,13 @@ input[type="date"]::-webkit-date-and-time-value {
   font-weight: 600;
   font-size: 0.9rem;
   line-height: 1.35;
+}
+.activity-row-city {
+  display: block;
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 0.1rem;
 }
 .activity-row-meta {
   flex-shrink: 0;

@@ -30,6 +30,7 @@ window.WorldPlanner = (() => {
   let tripListOpen = true;
   let activityDetailCtx = null;
   let pendingDeleteTrip = null;
+  let dragState = null;
 
   let lastActionAt = 0;
   let lastActionKey = "";
@@ -82,6 +83,10 @@ window.WorldPlanner = (() => {
     }
 
     if (e.target.closest("input, textarea, select, option, a[href]")) {
+      touchTrack = null;
+      return;
+    }
+    if (e.target.closest(".activity-drag-handle") || dragState) {
       touchTrack = null;
       return;
     }
@@ -522,6 +527,23 @@ window.WorldPlanner = (() => {
     return true;
   }
 
+  function applyItemOrder(trip, dayNum, orderedIds) {
+    const day = trip.days?.[dayNum - 1];
+    if (!day || !orderedIds?.length) return false;
+    const items = itemsOf(day);
+    const groupSet = new Set(orderedIds);
+    const queue = orderedIds.map((id) => items.find((i) => i.id === id)).filter(Boolean);
+    if (!queue.length) return false;
+    const next = [];
+    for (const item of items) {
+      if (groupSet.has(item.id)) next.push(queue.shift());
+      else next.push(item);
+    }
+    day.items = next.filter(Boolean);
+    trip.updatedAt = new Date().toISOString();
+    return true;
+  }
+
   function moveEntry(state, tripId, dayNum, entryId, dir) {
     const trip = ensurePlanner(state).trips.find((t) => t.id === tripId);
     if (!trip) return false;
@@ -609,6 +631,42 @@ window.WorldPlanner = (() => {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
   }
 
+  function normalizeCountryKey(s) {
+    const n = String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+    if (n === "turkiye" || n === "tr") return "turkey";
+    if (n === "usa" || n === "us" || n === "u s a" || n === "united states of america") return "united states";
+    if (n === "uk" || n === "gb" || n === "great britain") return "united kingdom";
+    return n;
+  }
+
+  function findCountry(state, nameOrId) {
+    const key = normalizeCountryKey(nameOrId);
+    if (!key) return null;
+    return (state.countries || []).find((c) => {
+      const names = [c.name, c.id, String(c.id || "").replace(/-/g, " "), c.iso];
+      return names.some((x) => normalizeCountryKey(x) === key);
+    }) || null;
+  }
+
+  function ensureCountry(state, countryName, lat, lng) {
+    if (!countryName || /^region/i.test(countryName) || countryName === "Unknown") return null;
+    const existing = findCountry(state, countryName);
+    if (existing) return existing;
+    const id = countryName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
+    const pin = CountryMeta.pinCenterFor(id) || {};
+    const country = {
+      id,
+      name: /t[uü]rkiye/i.test(countryName) ? "Turkey" : countryName,
+      iso: WorldPlannerImport?.countryIso?.(countryName) || id.slice(0, 2),
+      lat: Number.isFinite(lat) ? lat : (pin.lat || 0),
+      lng: Number.isFinite(lng) ? lng : (pin.lng || 0),
+      placeCount: 0,
+    };
+    state.countries.push(country);
+    CountryMeta.init(state.countries);
+    return country;
+  }
+
   function upsertPlaceFromItem(state, { name, city, countryId, countryName, category, url, lat, lng, notes }) {
     if (!name) return null;
     const cleanName = String(name).trim();
@@ -637,22 +695,9 @@ window.WorldPlanner = (() => {
       WorldStore.recalcCountry(state, existing.countryId);
       return existing;
     }
-    let cid = countryId;
-    if (!cid && countryName) {
-      const c = (state.countries || []).find((x) => x.name.toLowerCase() === countryName.toLowerCase() || x.id === countryName.toLowerCase());
-      cid = c?.id;
-    }
-    if (!cid) {
-      const id = (countryName || "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
-      if (!(state.countries || []).some((c) => c.id === id) && countryName && !/^region/i.test(countryName) && countryName !== "Unknown") {
-        state.countries.push({
-          id, name: countryName, iso: id.slice(0, 2), lat: lat || 0, lng: lng || 0, placeCount: 0,
-        });
-        CountryMeta.init(state.countries);
-      }
-      cid = id;
-    }
-    const country = state.countries.find((c) => c.id === cid);
+    let country = countryId ? (state.countries || []).find((c) => c.id === countryId) : null;
+    if (!country) country = ensureCountry(state, countryName, parsedLat, parsedLng);
+    const cid = country?.id || countryId || "";
     const place = {
       id: WorldStore.nextPlaceId(state),
       countryId: cid,
@@ -670,22 +715,19 @@ window.WorldPlanner = (() => {
   }
 
   async function importDraft(state, draft) {
+    const beforeIds = new Set((state.places || []).map((p) => p.id));
     const segments = [];
     for (const seg of draft.segments || []) {
-      const countryName = seg.countryName || "";
-      let countryId = "";
-      if (countryName) {
-        const c = (state.countries || []).find((x) => x.name.toLowerCase() === countryName.toLowerCase());
-        countryId = c?.id || "";
-      }
-      if (!countryId) {
-        const c = (state.countries || []).find((x) => /united states|usa/i.test(x.name)) || state.countries[0];
-        countryId = c?.id || "";
-      }
+      const city = seg.city || "Other";
+      const countryName = seg.countryName || WorldPlannerImport?.locationCountryHint?.(city, draft.name) || "";
+      let country = findCountry(state, countryName);
+      if (!country && countryName) country = ensureCountry(state, countryName);
+      if (!country) country = findCountry(state, "United States") || state.countries[0];
+      const countryId = country?.id || "";
       segments.push({
         id: WorldStore.uid("seg"),
         countryId,
-        city: seg.city || "Other",
+        city,
         startDate: seg.startDate,
         endDate: seg.endDate,
       });
@@ -707,6 +749,23 @@ window.WorldPlanner = (() => {
 
     function itemFromRow(row, countryId, countryName, city) {
       const rowCity = (row.location || city || "Other").trim();
+      if (!row.place) {
+        return {
+          id: WorldStore.uid("item"),
+          time: row.time || "",
+          name: "—",
+          notes: row.notes || "",
+          category: PlaceCategorize.fromPlannerLabel(row.category) || "place",
+          url: row.url || "",
+          placeId: "",
+          slot: "activity",
+          placeholder: true,
+          importDate: row.date || "",
+          importDay: row.day || null,
+          importLocation: rowCity,
+          importCategoryLabel: row.category || "",
+        };
+      }
       const cat = PlaceCategorize.fromPlannerLabel(row.category) || PlaceCategorize.categorize(row.place, row.notes);
       const place = upsertPlaceFromItem(state, {
         name: row.place,
@@ -772,6 +831,31 @@ window.WorldPlanner = (() => {
 
     WorldStore.recategorizePlaces(state);
     WorldGlobe.updatePins?.(WorldStore.countriesForUi(state));
+    const addedPlaces = (state.places || []).filter((p) => !beforeIds.has(p.id));
+    const byKey = new Map();
+    function bump(city, country, field) {
+      const key = `${city}|${country}`;
+      if (!byKey.has(key)) byKey.set(key, { city, country, count: 0, places: 0 });
+      byKey.get(key)[field] += 1;
+    }
+    for (const day of trip.days || []) {
+      for (const item of itemsOf(day)) {
+        const city = item.importLocation || "Other";
+        const seg = (trip.segments || []).find((s) => s.city === city) || segmentForDay(trip, day.day);
+        const country = state.countries.find((c) => c.id === seg?.countryId);
+        bump(city, country?.name || "—", "count");
+      }
+    }
+    for (const p of addedPlaces) {
+      const country = state.countries.find((c) => c.id === p.countryId);
+      bump(p.city || "Other", country?.name || "—", "places");
+    }
+    trip.importSummary = {
+      totalActivities: [...byKey.values()].reduce((s, r) => s + r.count, 0),
+      totalPlaces: addedPlaces.length,
+      rows: [...byKey.values()].sort((a, b) => b.count - a.count || a.city.localeCompare(b.city)),
+    };
+    if (!trip.dayListMode) trip.dayListMode = "timeline";
     return trip;
   }
 
@@ -1068,7 +1152,7 @@ window.WorldPlanner = (() => {
       <section class="planner-rail">
         <div class="planner-rail-actions">
           <button type="button" class="btn btn-primary" data-act="new-trip" onclick="WorldPlanner.act(event)">+ New trip</button>
-          <button type="button" class="btn btn-secondary" data-act="import-pick" onclick="WorldPlanner.act(event)">Import Excel/PDF</button>
+          <button type="button" class="btn btn-secondary" data-act="import-pick" onclick="WorldPlanner.act(event)">Import Excel/PDF/ZIP</button>
         </div>
         ${trips.length ? `<div class="planner-trip-chips">
           ${trips.map((t) => `
@@ -1079,7 +1163,7 @@ window.WorldPlanner = (() => {
               </button>
               <button type="button" class="btn btn-ghost btn-sm trip-chip-del" data-act="delete-trip" data-trip-id="${esc(t.id)}" onclick="WorldPlanner.act(event)" aria-label="Delete trip">✕</button>
             </div>`).join("")}
-        </div>` : `<p class="muted planner-empty-hint">No trips yet — create one or import an Excel/PDF itinerary.</p>`}
+        </div>` : `<p class="muted planner-empty-hint">No trips yet — create one or import an Excel/PDF/ZIP itinerary.</p>`}
       </section>`;
   }
 
@@ -1098,19 +1182,17 @@ window.WorldPlanner = (() => {
       </section>`;
   }
 
-  function renderActivityRow(state, trip, item, dayNum, { showCategory = false, reorder = false, index = 0, total = 1 } = {}) {
+  function renderActivityRow(state, trip, item, dayNum, { showCategory = false, reorder = true } = {}) {
     const seg = segmentForDay(trip, dayNum);
     const country = state.countries.find((c) => c.id === seg?.countryId);
     const href = mapsHref(item, item.importLocation || seg?.city, country?.name);
-    return `<div class="activity-row">
+    const multi = new Set(itemsOf(trip.days?.[dayNum - 1] || {}).map((i) => i.importLocation).filter(Boolean)).size > 1;
+    return `<div class="activity-row${item.placeholder ? " is-placeholder" : ""}">
+      ${reorder ? `<button type="button" class="activity-drag-handle" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Hold and drag to reorder"><span></span><span></span><span></span></button>` : ""}
       ${showCategory ? `<span class="activity-row-cat">${categoryIcon(item.category)}</span>` : ""}
-      <span class="activity-row-text">${esc(item.name || "Activity")}</span>
+      <span class="activity-row-text">${esc(item.name || "—")}${multi && item.importLocation ? `<small class="activity-row-city">${esc(item.importLocation)}</small>` : ""}</span>
       ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
       <span class="activity-row-actions">
-        ${reorder ? `
-          <button type="button" class="activity-row-move" data-act="item-up" data-item="${esc(item.id)}" data-day="${dayNum}" ${index === 0 ? "disabled" : ""} aria-label="Move up" onclick="WorldPlanner.act(event)">↑</button>
-          <button type="button" class="activity-row-move" data-act="item-down" data-item="${esc(item.id)}" data-day="${dayNum}" ${index >= total - 1 ? "disabled" : ""} aria-label="Move down" onclick="WorldPlanner.act(event)">↓</button>
-        ` : ""}
         ${href ? `<a class="activity-row-maps" href="${esc(href)}" target="_blank" rel="noopener" aria-label="Open in Maps">Maps</a>` : ""}
         <button type="button" class="activity-row-detail" data-act="activity-detail" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Activity details" onclick="WorldPlanner.act(event)">ⓘ</button>
       </span>
@@ -1172,6 +1254,35 @@ window.WorldPlanner = (() => {
     } catch { /* */ }
     render(state);
     WorldApp.toast(`Deleted "${name}"`);
+  }
+
+  function hideImportSummary() {
+    const modal = $("import-summary-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function showImportSummary(summary) {
+    if (!summary) return;
+    const list = $("ism-list");
+    const lead = $("ism-lead");
+    const countries = [...new Set((summary.rows || []).map((r) => r.country).filter((c) => c && c !== "—"))];
+    const countryLabel = countries.length ? countries.join(", ") : "your trip";
+    const acts = summary.totalActivities || 0;
+    const places = summary.totalPlaces || 0;
+    if (lead) {
+      lead.textContent = `${acts} ${acts === 1 ? "activity" : "activities"} added to ${countryLabel}`
+        + (places ? ` · ${places} new ${places === 1 ? "place" : "places"} on the globe` : "");
+    }
+    if (list) {
+      list.innerHTML = (summary.rows || []).length
+        ? summary.rows.map((r) => {
+          const extra = r.places ? ` · ${r.places} new` : "";
+          return `<li class="import-summary-row"><span>${esc(r.city)} · ${esc(r.country)}</span><strong>${r.count} ${r.count === 1 ? "activity" : "activities"}${extra}</strong></li>`;
+        }).join("")
+        : '<li class="muted">No locations found</li>';
+    }
+    const modal = $("import-summary-modal");
+    if (modal) modal.hidden = false;
   }
 
   function hideActivityDetail() {
@@ -1247,8 +1358,6 @@ window.WorldPlanner = (() => {
         <div class="activity-card-actions">
           ${canPin ? `<button type="button" class="btn btn-ghost btn-sm" data-act="pin-globe" data-item="${esc(item.id)}" data-day="${day.day}">Globe</button>` : ""}
           ${href ? `<a class="btn btn-ghost btn-sm place-link" href="${esc(href)}" target="_blank" rel="noopener">Maps</a>` : ""}
-          <button type="button" class="btn btn-ghost btn-sm" data-act="item-up" data-item="${esc(item.id)}" data-day="${day.day}">↑</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-act="item-down" data-item="${esc(item.id)}" data-day="${day.day}">↓</button>
           <button type="button" class="btn btn-ghost btn-sm" data-act="item-remove" data-item="${esc(item.id)}" data-day="${day.day}" aria-label="Remove">✕</button>
         </div>
       </div>
@@ -1274,9 +1383,11 @@ window.WorldPlanner = (() => {
     if (!day) return '<p class="muted">No days in this trip yet.</p>';
     const seg = segmentForDay(trip, dayNum);
     const country = state.countries.find((c) => c.id === seg?.countryId);
+    const itemCities = [...new Set(itemsOf(day).map((i) => i.importLocation).filter((c) => c && c !== "Other"))];
+    const cityLabel = itemCities.length ? itemCities.join(" · ") : (seg?.city && seg.city !== "Other" ? seg.city : "");
     const headline = [
       day.date ? fmtDateLong(day.date) : `Day ${dayNum}`,
-      seg?.city && seg.city !== "Other" ? seg.city : "",
+      cityLabel,
       country?.name || "",
     ].filter(Boolean).join(" · ");
     const total = trip.days?.length || 0;
@@ -1296,10 +1407,12 @@ window.WorldPlanner = (() => {
                 const n = i + 1;
                 const seg = segmentForDay(trip, n);
                 const country = state.countries.find((c) => c.id === seg?.countryId);
+                const cities = [...new Set(itemsOf(d).map((it) => it.importLocation).filter((c) => c && c !== "Other"))];
+                const cityLabel = cities.length ? cities.join(" · ") : (seg?.city && seg.city !== "Other" ? seg.city : "");
                 const label = [
                   `Day ${n}`,
                   d.date ? fmtDate(d.date) : "",
-                  seg?.city && seg.city !== "Other" ? seg.city : "",
+                  cityLabel,
                   country?.name || "",
                 ].filter(Boolean).join(" · ");
                 return `<option value="${n}" ${n === dayNum ? "selected" : ""}>${esc(label)}</option>`;
@@ -1801,6 +1914,9 @@ window.WorldPlanner = (() => {
       const trip = await importDraft(state, draft);
       WorldStore.saveState(state);
       enterTripView(state, trip.id, { dayNum: 1, flush: true, toast: `Imported ${draft.rowCount} activities` });
+      const summary = trip.importSummary;
+      delete trip.importSummary;
+      showImportSummary(summary);
       return trip;
     } catch (err) {
       console.warn("Import failed", err);
@@ -1908,11 +2024,168 @@ window.WorldPlanner = (() => {
     }
   }
 
+  const LONG_PRESS_MS = 340;
+  const CANCEL_MOVE_PX = 12;
+
+  function dragWrapFromHandle(handle) {
+    return handle.closest(".activity-timeline-row") || handle.closest(".activity-row");
+  }
+
+  function dragSiblings(wrap) {
+    if (!wrap?.parentElement) return [];
+    return [...wrap.parentElement.children].filter((el) =>
+      el.classList.contains("activity-timeline-row") || el.classList.contains("activity-row")
+    );
+  }
+
+  function clearDragListeners() {
+    window.removeEventListener("pointermove", onActivityDragMove, true);
+    window.removeEventListener("pointerup", onActivityDragEnd, true);
+    window.removeEventListener("pointercancel", onActivityDragEnd, true);
+  }
+
+  function cleanupDrag(persist) {
+    const ds = dragState;
+    dragState = null;
+    clearDragListeners();
+    if (!ds) return;
+    if (ds.timer) clearTimeout(ds.timer);
+    ds.ghost?.remove();
+    ds.wrap?.classList.remove("is-drop-placeholder");
+    if (ds.bodyEl) ds.bodyEl.style.overflow = ds.prevOverflow || "";
+    try { ds.handle?.releasePointerCapture?.(ds.pointerId); } catch { /* */ }
+    if (persist && ds.armed && ds.wrap) {
+      const ids = dragSiblings(ds.wrap)
+        .map((el) => el.querySelector(".activity-drag-handle")?.dataset.item)
+        .filter(Boolean);
+      const state = WorldApp.getState();
+      const trip = getActiveTrip(state);
+      if (trip && applyItemOrder(trip, ds.dayNum, ids)) {
+        try {
+          WorldApp.persist({ touchPlanner: true, cloud: true, refreshUi: false });
+        } catch { /* */ }
+        render(state);
+      }
+    }
+  }
+
+  function armActivityDrag() {
+    if (!dragState || dragState.armed) return;
+    const wrap = dragState.wrap;
+    const last = dragState.lastEvent;
+    if (!wrap || !last) return;
+    dragState.armed = true;
+    const rect = wrap.getBoundingClientRect();
+    const ghost = wrap.cloneNode(true);
+    ghost.classList.add("activity-drag-ghost");
+    ghost.setAttribute("aria-hidden", "true");
+    Object.assign(ghost.style, {
+      position: "fixed",
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.width}px`,
+      margin: "0",
+      zIndex: "80",
+      pointerEvents: "none",
+    });
+    document.body.appendChild(ghost);
+    wrap.classList.add("is-drop-placeholder");
+    dragState.ghost = ghost;
+    dragState.offsetY = last.clientY - rect.top;
+    dragState.originLeft = rect.left;
+    const bodyEl = document.querySelector(".planner-body");
+    if (bodyEl) {
+      dragState.bodyEl = bodyEl;
+      dragState.prevOverflow = bodyEl.style.overflow;
+      bodyEl.style.overflow = "hidden";
+    }
+    try { dragState.handle.setPointerCapture(dragState.pointerId); } catch { /* */ }
+    try { navigator.vibrate?.(12); } catch { /* */ }
+  }
+
+  function onActivityDragMove(e) {
+    if (!dragState) return;
+    dragState.lastEvent = e;
+    const dx = e.clientX - dragState.startX;
+    const dy = e.clientY - dragState.startY;
+    if (!dragState.armed) {
+      if (Math.hypot(dx, dy) > CANCEL_MOVE_PX) cleanupDrag(false);
+      return;
+    }
+    e.preventDefault();
+    if (dragState.ghost) {
+      dragState.ghost.style.top = `${e.clientY - dragState.offsetY}px`;
+      dragState.ghost.style.left = `${dragState.originLeft}px`;
+    }
+    const wrap = dragState.wrap;
+    const parent = wrap.parentElement;
+    if (!parent) return;
+    const siblings = dragSiblings(wrap);
+    const y = e.clientY;
+    let inserted = false;
+    for (const sib of siblings) {
+      if (sib === wrap) continue;
+      const rect = sib.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      if (y < mid) {
+        if (sib !== wrap.nextElementSibling) parent.insertBefore(wrap, sib);
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted) {
+      const last = siblings[siblings.length - 1];
+      if (last && last !== wrap) parent.appendChild(wrap);
+    }
+  }
+
+  function onActivityDragEnd(e) {
+    if (!dragState) return;
+    if (e) e.preventDefault();
+    cleanupDrag(!!dragState.armed);
+  }
+
+  function onActivityDragDown(e) {
+    const handle = e.target.closest?.(".activity-drag-handle");
+    if (!handle || handle.disabled) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const wrap = dragWrapFromHandle(handle);
+    if (!wrap) return;
+    if (dragState) cleanupDrag(false);
+    dragState = {
+      handle,
+      wrap,
+      dayNum: Number(handle.dataset.day),
+      itemId: handle.dataset.item,
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerId: e.pointerId,
+      lastEvent: e,
+      armed: false,
+      timer: setTimeout(armActivityDrag, LONG_PRESS_MS),
+    };
+    window.addEventListener("pointermove", onActivityDragMove, true);
+    window.addEventListener("pointerup", onActivityDragEnd, true);
+    window.addEventListener("pointercancel", onActivityDragEnd, true);
+  }
+
+  function initActivityDrag(panel) {
+    if (!panel || panel._activityDragBound) return;
+    panel._activityDragBound = true;
+    panel.addEventListener("pointerdown", onActivityDragDown, true);
+    panel.addEventListener("contextmenu", (e) => {
+      if (e.target.closest(".activity-drag-handle")) e.preventDefault();
+    });
+  }
+
   function init() {
     if (bound) return;
     const panel = $("planner-panel");
     if (!panel) return;
     bound = true;
+    initActivityDrag(panel);
     $("btn-planner")?.addEventListener("click", () => toggle(true));
     panel.addEventListener("click", panelPointer, true);
     panel.addEventListener("touchstart", panelPointer, { passive: true, capture: true });
@@ -1937,6 +2210,11 @@ window.WorldPlanner = (() => {
     $("tdm-confirm")?.addEventListener("click", confirmDeleteTrip);
     $("trip-delete-modal")?.addEventListener("click", (e) => {
       if (e.target.id === "trip-delete-modal") hideDeleteTripModal();
+    });
+    $("ism-ok")?.addEventListener("click", hideImportSummary);
+    $("ism-close")?.addEventListener("click", hideImportSummary);
+    $("import-summary-modal")?.addEventListener("click", (e) => {
+      if (e.target.id === "import-summary-modal") hideImportSummary();
     });
     $("adm-close")?.addEventListener("click", hideActivityDetail);
     $("activity-detail-modal")?.addEventListener("click", (e) => {

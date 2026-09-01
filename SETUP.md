@@ -50,7 +50,7 @@ If you still see **quota exceeded** after this compact format, wait for the Spar
 2. **Paste CSV** — My Maps format with lat/lng
 3. **Maps URL** — one URL per line, or `Place name | City | Country | URL` when a short link has no coordinates
 
-**Planner itinerary import:** open **Planner** → **Import Excel/PDF**. Accepts `.xlsx`, `.xls`, `.csv`, and `.pdf` with columns Date, Day, Location, Time/Order, Place/Activity, Notes, Category, Google Maps Link. New places from the file are added to the country/city bank.
+**Planner itinerary import:** open **Planner** → **Import Excel/PDF/ZIP**. Accepts `.xlsx`, `.xls`, `.csv`, `.pdf`, and `.zip` with columns Date, Day, Location, Time/Order, Place/Activity, Notes, Category, Google Maps Link. New places go to the matching country (Turkey for Istanbul/Cappadocia, etc.). A summary popup lists locations added.
 
 **CLI merge into seed:**
 ```bash

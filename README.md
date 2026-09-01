@@ -13,10 +13,10 @@ Interactive **3D travel globe** with Google Maps saved places, fine-grained cate
 - **Place browser** — filter by city & category, sort, group views
 - **Travel Planner**
   - Trip list (open / delete with confirm) and inner day page (← Trips, delete trip)
-  - Each day: **Categories** or **Timeline** (PDF order; ↑ ↓ to reorder)
-  - Activity rows show **Place/Activity** plus **Maps** next to **ⓘ** (popup: date, city, notes, link)
+  - Each day: **Categories** or **Timeline** (PDF order; long-press the 3 dotted lines to drag-reorder)
+  - Activity rows show a left grip, **Place/Activity**, **Maps** next to **ⓘ** (popup: date, city, notes, link)
   - **Map this day on globe** — globe pins + country panel of that day’s places
-- **Import itinerary** — Excel / PDF / CSV; PDF uses itinerary city pages only (e.g. New York, Niagara Falls, Washington)
+- **Import itinerary** — Excel / PDF / CSV / ZIP; PDF keeps itinerary city pages (and continuation pages), merges the same date/day across cities, then shows a locations-added popup
 - **Import places** — Google Takeout ZIP, My Maps CSV, or Maps URLs (`Name | City | Country | URL`)
 - **AI assistant** — persistent chat (Gemini / Groq / OpenRouter)
 - **Cloud sync** — compact Firestore payload (trips + places you added). Seed places stay in `data/places.json` and are **not** uploaded (avoids quota errors)
@@ -52,29 +52,29 @@ node scripts/import-takeout.js path/to/takeout.zip
 
 ## Travel Planner
 
-1. **Planner** — trip chips, **+ New trip**, **Import Excel/PDF**. ✕ deletes a trip after a confirm popup.
+1. **Planner** — trip chips, **+ New trip**, **Import Excel/PDF/ZIP**. ✕ deletes a trip after a confirm popup.
 2. **Create trip** — countries + date ranges; itinerary opens on the same page.
 3. **Inside a trip**
    - **← Trips** returns to the list (does not close Planner)
    - **Delete** in the trip header (same confirm popup)
    - Day chips scroll horizontally; dropdown + arrows change day
-   - **Timeline**: numbered PDF order; **↑ ↓** reorder activities; **Maps** + **ⓘ** on each row
-   - **Categories**: grouped by type; same Maps + ⓘ actions
+   - **Timeline**: numbered PDF order; long-press the **3 dotted lines** on the left, then drag to reorder; **Maps** + **ⓘ** on each row
+   - **Categories**: grouped by type; same grip + Maps + ⓘ actions
    - **Map this day on globe** closes Planner and shows that day’s places
 4. **+ Trip** on any saved place in a country page
 5. **Save trip** / **Export Excel** at the bottom of the trip document
 
-### Import a trip planner (xlsx / pdf / csv)
+### Import a trip planner (xlsx / pdf / csv / zip)
 
-In Planner, tap **Import Excel/PDF**. Expected columns:
+In Planner, tap **Import Excel/PDF/ZIP**. Expected columns:
 
 | Date | Day | Location | Time/Order | Place/Activity | Notes | Category | Google Maps Link |
 |------|-----|----------|------------|----------------|-------|----------|------------------|
 | 17.09.26 | Day 1 | New York | 05:15 | Landing in LGA | Flight LY027 | Transportation / Flight | https://maps.google.com/… |
 
-PDF import reads **itinerary section pages** only (city headers like New York / Niagara Falls / Washington), not cover or “total days” overview pages. After parser changes, delete the old trip and re-import.
+PDF import reads itinerary section pages (city headers like New York / Istanbul / Cappadocia), plus **continuation pages** that keep the same table. Rows that share a **day and date** across pages are merged (all cities + all activities, including empty placeholders). Cover / “total days” pages without a table are skipped. After import, a popup lists each location, country, and count. After parser changes, delete the old trip and re-import.
 
-New places from the file are added to the country/city bank with a category (Food & Dining, Sightseeing, Coffee & Snacks, etc.).
+New places from the file are added to the correct country (e.g. Turkey) with category and Maps link.
 
 ## Data
 
