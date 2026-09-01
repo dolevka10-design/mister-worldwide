@@ -1347,6 +1347,9 @@ window.WorldPlanner = (() => {
     panel?.addEventListener("click", onClick);
     panel?.addEventListener("change", onChange);
     panel?.addEventListener("focusout", onBlur);
+    panel?.addEventListener("toggle", (e) => {
+      if (e.target?.classList?.contains("route-editor")) routeEditorOpen = e.target.open;
+    }, true);
     $("planner-import-file")?.addEventListener("change", (e) => {
       const file = e.target.files?.[0];
       e.target.value = "";
