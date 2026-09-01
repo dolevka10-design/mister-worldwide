@@ -207,6 +207,8 @@ window.WorldStore = (() => {
     return {
       trips,
       activeTripId: (lMs >= rMs ? l.activeTripId : r.activeTripId) || l.activeTripId || r.activeTripId || trips[0]?.id || null,
+      view: (lMs >= rMs ? l.view : r.view) || l.view || r.view || (trips.length ? "list" : "create"),
+      activeDayNum: (lMs >= rMs ? l.activeDayNum : r.activeDayNum) || l.activeDayNum || r.activeDayNum || 1,
       updatedAt,
     };
   }
