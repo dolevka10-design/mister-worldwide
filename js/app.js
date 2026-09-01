@@ -546,39 +546,45 @@ window.WorldApp = (() => {
   }
 
   async function start() {
-    bindUi();
-    bindAuth();
-    watchMainView();
-    WorldPlanner?.init?.();
-    WorldImportPanel?.init?.();
-    await WorldStore.loadSeed();
-    state = WorldStore.reconcileState(WorldStore.loadState());
-    CountryMeta.init(state.countries);
-    refresh();
+    try {
+      bindUi();
+      bindAuth();
+      watchMainView();
+      WorldPlanner?.init?.();
+      WorldImportPanel?.init?.();
+      await WorldStore.loadSeed();
+      state = WorldStore.reconcileState(WorldStore.loadState());
+      CountryMeta.init(state.countries);
+      refresh();
 
-    if (!WorldCloud.configured) {
-      $("auth-config-hint").hidden = false;
-      $("auth-config-hint").textContent = "Firebase not configured — running in local-only mode.";
-      await onUser(null);
-      return;
-    }
-
-    const init = WorldCloud.initFirebase();
-    if (!init.ok) {
-      await onUser(null);
-      return;
-    }
-
-    WorldCloud.onAuthStateChanged(async (u, err) => {
-      if (err) {
-        const quota = WorldCloud.isQuotaError?.(err);
-        toast(
-          quota ? "Cloud sync unavailable (quota). Planner still works on this device." : err.message,
-          quota ? "warn" : "error"
-        );
+      if (!WorldCloud.configured) {
+        $("auth-config-hint").hidden = false;
+        $("auth-config-hint").textContent = "Firebase not configured — running in local-only mode.";
+        await onUser(null);
+        return;
       }
-      await onUser(u);
-    });
+
+      const init = WorldCloud.initFirebase();
+      if (!init.ok) {
+        await onUser(null);
+        return;
+      }
+
+      WorldCloud.onAuthStateChanged(async (u, err) => {
+        if (err) {
+          const quota = WorldCloud.isQuotaError?.(err);
+          toast(
+            quota ? "Cloud sync unavailable (quota). Planner still works on this device." : err.message,
+            quota ? "warn" : "error"
+          );
+        }
+        await onUser(u);
+      });
+    } catch (e) {
+      console.error("App start failed", e);
+      showAuth(false);
+      toast(e?.message || "App failed to start — try refreshing", "error");
+    }
   }
 
   return {

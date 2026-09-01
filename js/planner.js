@@ -57,6 +57,7 @@ window.WorldPlanner = (() => {
     if (el) handleAction(el, e);
   }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+  function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
   function slotOptions(selected) {
     return SLOTS.map((s) => `<option value="${s.id}" ${s.id === selected ? "selected" : ""}>${s.label}</option>`).join("");
   }
