@@ -25,6 +25,8 @@ window.WorldPlanner = (() => {
   let keepSegFormOpen = true;
   let bound = false;
   let lastScroll = 0;
+  let activeDayNum = 1;
+  let routeEditorOpen = false;
 
   function slotLabel(id) { return SLOTS.find((s) => s.id === id)?.label || id; }
   function esc(s) { return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
@@ -70,6 +72,38 @@ window.WorldPlanner = (() => {
     const [y, m, d] = String(iso).split("-");
     if (!d) return iso;
     return `${d}.${m}.${String(y).slice(2)}`;
+  }
+
+  function fmtDateLong(iso) {
+    if (!iso) return "";
+    const d = parseDate(iso);
+    if (!d) return fmtDate(iso);
+    return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" });
+  }
+
+  function clampDayNum(trip, n) {
+    const max = Math.max(1, trip?.days?.length || 1);
+    return Math.min(max, Math.max(1, n || 1));
+  }
+
+  function categoryIcon(cat) {
+    const icons = {
+      restaurant: "🍽️", cafe: "☕", landmark: "📍", museum: "🏛️", hotel: "🏨", bar: "🍸",
+      nightlife: "🍸", transport: "🚆", shopping: "🛍️", park: "🌳", show: "🎭", guide: "📖",
+      bakery: "🥐", dessert: "🍰", brunch: "🥐", pizza: "🍕", sushi: "🍣",
+    };
+    return icons[cat] || "📌";
+  }
+
+  function groupItemsByCategory(items) {
+    const order = [];
+    const groups = new Map();
+    for (const item of items) {
+      const key = item.category || "place";
+      if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+      groups.get(key).push(item);
+    }
+    return order.map((k) => ({ category: k, items: groups.get(k) }));
   }
 
   function slotsToItems(slots) {
@@ -235,6 +269,19 @@ window.WorldPlanner = (() => {
   }
 
   function setActiveTrip(state, tripId) { ensurePlanner(state).activeTripId = tripId || null; }
+
+  function deleteTrip(state, tripId) {
+    const planner = ensurePlanner(state);
+    const idx = planner.trips.findIndex((t) => t.id === tripId);
+    if (idx < 0) return false;
+    planner.trips.splice(idx, 1);
+    if (planner.activeTripId === tripId) {
+      planner.activeTripId = planner.trips[0]?.id || null;
+      activeDayNum = 1;
+      showCreate = !planner.trips.length;
+    }
+    return true;
+  }
 
   function placesForDay(state, trip, dayNum, { city } = {}) {
     const seg = segmentForDay(trip, dayNum);
@@ -708,10 +755,13 @@ window.WorldPlanner = (() => {
         </div>
         ${trips.length ? `<div class="planner-trip-chips">
           ${trips.map((t) => `
-            <button type="button" class="trip-chip ${t.id === activeId ? "active" : ""}" data-act="open-trip" data-trip-id="${esc(t.id)}">
-              <strong>${esc(t.name)}</strong>
-              <span class="muted">${esc(formatTripDates(t))}</span>
-            </button>`).join("")}
+            <div class="trip-chip-row">
+              <button type="button" class="trip-chip ${t.id === activeId ? "active" : ""}" data-act="open-trip" data-trip-id="${esc(t.id)}">
+                <strong>${esc(t.name)}</strong>
+                <span class="muted">${esc(formatTripDates(t))}</span>
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm trip-chip-del" data-act="delete-trip" data-trip-id="${esc(t.id)}" aria-label="Delete trip">✕</button>
+            </div>`).join("")}
         </div>` : `<p class="muted planner-empty-hint">No trips yet — create one or import an Excel/PDF itinerary.</p>`}
       </section>`;
   }
@@ -731,26 +781,84 @@ window.WorldPlanner = (() => {
       </section>`;
   }
 
-  function renderItemRow(item, day, seg, country) {
+  function renderActivityCard(item, day, seg, country, state) {
     const href = mapsHref(item, seg?.city, country?.name);
-    return `<article class="itin-item" data-item-id="${esc(item.id)}" data-day="${day.day}">
-      <div class="itin-item-main">
-        <input class="itin-time pill-select" data-act="item-time" data-item="${esc(item.id)}" data-day="${day.day}" value="${esc(item.time || "")}" placeholder="Time" />
-        <div class="itin-item-body">
-          <input class="itin-name pill-select" data-act="item-name" data-item="${esc(item.id)}" data-day="${day.day}" value="${esc(item.name || "")}" />
-          <input class="itin-notes pill-select" data-act="item-notes" data-item="${esc(item.id)}" data-day="${day.day}" value="${esc(item.notes || "")}" placeholder="Notes" />
-          <div class="itin-item-meta">
-            <select class="pill-select itin-cat" data-act="item-cat" data-item="${esc(item.id)}" data-day="${day.day}">${catOptions(item.category)}</select>
-            ${href ? `<a class="place-link" href="${esc(href)}" target="_blank" rel="noopener">Maps</a>` : `<span class="muted">No map</span>`}
-          </div>
+    const catLabel = PlaceCategorize.plannerLabel(item.category);
+    const place = item.placeId ? (state.places || []).find((p) => p.id === item.placeId) : null;
+    const canPin = !!(item.lat ?? place?.lat) || !!seg?.countryId;
+    return `<article class="activity-card" data-item-id="${esc(item.id)}" data-day="${day.day}">
+      <div class="activity-card-head">
+        <span class="activity-cat-badge">${categoryIcon(item.category)} ${esc(catLabel)}</span>
+        <input class="activity-time pill-select" data-act="item-time" data-item="${esc(item.id)}" data-day="${day.day}" value="${esc(item.time || "")}" placeholder="Time" />
+      </div>
+      <input class="activity-name pill-select" data-act="item-name" data-item="${esc(item.id)}" data-day="${day.day}" value="${esc(item.name || "")}" placeholder="Place / activity" />
+      <input class="activity-notes pill-select" data-act="item-notes" data-item="${esc(item.id)}" data-day="${day.day}" value="${esc(item.notes || "")}" placeholder="Notes" />
+      <div class="activity-card-foot">
+        <select class="pill-select activity-cat-select" data-act="item-cat" data-item="${esc(item.id)}" data-day="${day.day}">${catOptions(item.category)}</select>
+        <div class="activity-card-actions">
+          ${canPin ? `<button type="button" class="btn btn-ghost btn-sm" data-act="pin-globe" data-item="${esc(item.id)}" data-day="${day.day}">Globe</button>` : ""}
+          ${href ? `<a class="btn btn-ghost btn-sm place-link" href="${esc(href)}" target="_blank" rel="noopener">Maps</a>` : ""}
+          <button type="button" class="btn btn-ghost btn-sm" data-act="item-up" data-item="${esc(item.id)}" data-day="${day.day}">↑</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-act="item-down" data-item="${esc(item.id)}" data-day="${day.day}">↓</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-act="item-remove" data-item="${esc(item.id)}" data-day="${day.day}" aria-label="Remove">✕</button>
         </div>
       </div>
-      <div class="itin-item-actions">
-        <button type="button" class="btn btn-ghost btn-sm" data-act="item-up" data-item="${esc(item.id)}" data-day="${day.day}">↑</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-act="item-down" data-item="${esc(item.id)}" data-day="${day.day}">↓</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-act="item-remove" data-item="${esc(item.id)}" data-day="${day.day}" aria-label="Remove">✕</button>
-      </div>
     </article>`;
+  }
+
+  function renderDayAddForm(day) {
+    return `<div class="day-add card">
+      <strong>Add activity</strong>
+      <div class="day-add-grid">
+        <input class="pill-select add-item-time" data-day="${day.day}" placeholder="Time" />
+        <input class="pill-select add-item-name" data-day="${day.day}" placeholder="Place / activity" />
+        <input class="pill-select add-item-notes" data-day="${day.day}" placeholder="Notes" />
+        <select class="pill-select add-item-cat" data-day="${day.day}">${catOptions("landmark")}</select>
+        <input class="pill-select add-item-url" data-day="${day.day}" placeholder="Maps URL (optional)" />
+        <button type="button" class="btn btn-secondary" data-act="add-item" data-day="${day.day}">+ Add to day</button>
+      </div>
+    </div>`;
+  }
+
+  function renderDayPage(state, trip, dayNum) {
+    const day = trip.days?.[dayNum - 1];
+    if (!day) return '<p class="muted">No days in this trip yet.</p>';
+    const seg = segmentForDay(trip, dayNum);
+    const country = state.countries.find((c) => c.id === seg?.countryId);
+    const headline = [
+      day.date ? fmtDateLong(day.date) : `Day ${dayNum}`,
+      seg?.city && seg.city !== "Other" ? seg.city : "",
+      country?.name || "",
+    ].filter(Boolean).join(" · ");
+    const groups = groupItemsByCategory(itemsOf(day));
+    const total = trip.days?.length || 0;
+    return `
+      <section class="day-page" id="planner-day-page">
+        <header class="day-page-head card">
+          <p class="day-page-kicker">Day ${dayNum} of ${total}</p>
+          <h2 class="day-page-title">${esc(headline)}</h2>
+        </header>
+        <nav class="day-nav-bar" aria-label="Day navigation">
+          <button type="button" class="btn btn-ghost btn-sm" data-act="day-prev" ${dayNum <= 1 ? "disabled" : ""}>←</button>
+          <div class="day-nav-chips" role="tablist">
+            ${(trip.days || []).map((d) => `
+              <button type="button" role="tab" class="day-nav-chip ${d.day === dayNum ? "active" : ""}" data-act="day-go" data-day="${d.day}" aria-selected="${d.day === dayNum}">
+                ${d.date ? esc(fmtDate(d.date)) : `D${d.day}`}
+              </button>`).join("")}
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" data-act="day-next" ${dayNum >= total ? "disabled" : ""}>→</button>
+        </nav>
+        <div class="day-sections">
+          ${groups.length ? groups.map((g) => `
+            <section class="day-category-section card">
+              <h3 class="day-category-title">${categoryIcon(g.category)} ${esc(PlaceCategorize.plannerLabel(g.category))}</h3>
+              <div class="activity-list">
+                ${g.items.map((item) => renderActivityCard(item, day, seg, country, state)).join("")}
+              </div>
+            </section>`).join("") : '<p class="muted day-empty">No activities yet — add one below.</p>'}
+        </div>
+        ${renderDayAddForm(day)}
+      </section>`;
   }
 
   function renderLocationSection(state, trip, seg, idx) {
@@ -782,26 +890,6 @@ window.WorldPlanner = (() => {
         <label class="field field-inline"><span class="muted">Start</span><input class="seg-edit-start pill-select" type="date" data-act="seg-field" data-seg="${esc(seg.id)}" data-field="startDate" value="${esc(seg.startDate || "")}" /></label>
         <label class="field field-inline"><span class="muted">End</span><input class="seg-edit-end pill-select" type="date" data-act="seg-field" data-seg="${esc(seg.id)}" data-field="endDate" value="${esc(seg.endDate || "")}" /></label>
       </div>
-      ${days.map((day) => `
-        <div class="itin-day" id="day-${day.day}">
-          <div class="itin-day-head">
-            <h4>Day ${day.day}${day.date ? ` · ${fmtDate(day.date)}` : ""}</h4>
-            <div class="day-row-actions">
-              <button type="button" class="btn btn-ghost btn-sm" data-act="day-up" data-day="${day.day}">↑</button>
-              <button type="button" class="btn btn-ghost btn-sm" data-act="day-down" data-day="${day.day}">↓</button>
-              <button type="button" class="btn btn-ghost btn-sm" data-act="day-remove" data-day="${day.day}">✕</button>
-            </div>
-          </div>
-          ${itemsOf(day).map((item) => renderItemRow(item, day, seg, country)).join("") || '<p class="muted">No places yet</p>'}
-          <div class="itin-add-row">
-            <input class="pill-select add-item-time" data-day="${day.day}" placeholder="Time" />
-            <input class="pill-select add-item-name" data-day="${day.day}" placeholder="Place / activity" />
-            <input class="pill-select add-item-notes" data-day="${day.day}" placeholder="Notes" />
-            <select class="pill-select add-item-cat" data-day="${day.day}">${catOptions("landmark")}</select>
-            <input class="pill-select add-item-url" data-day="${day.day}" placeholder="Maps URL" />
-            <button type="button" class="btn btn-secondary btn-sm" data-act="add-item" data-day="${day.day}">+ Add</button>
-          </div>
-        </div>`).join("")}
       ${guides.length ? `<div class="itin-guides"><h4>Getting around · ${esc(seg.city)}</h4>
         ${guides.map((g) => `<article class="guide-card"><strong>${esc(g.title)}</strong><pre class="guide-body">${esc(g.body)}</pre>
           <button type="button" class="btn btn-ghost btn-sm" data-act="guide-remove" data-guide="${esc(g.id)}">Remove</button></article>`).join("")}
@@ -812,30 +900,30 @@ window.WorldPlanner = (() => {
   function renderTripDoc(state, trip) {
     const countries = WorldStore.countriesForUi(state);
     const countryOpts = countries.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
-    const locNav = (trip.segments || []).map((s) =>
-      `<button type="button" class="loc-jump" data-act="jump" data-jump="#seg-${esc(s.id)}">${esc(s.city)}</button>`
-    ).join("");
+    activeDayNum = clampDayNum(trip, activeDayNum);
     return `
       <article class="planner-trip-doc" id="planner-trip-doc">
         <header class="trip-doc-head card">
           <input id="trip-name-edit" class="trip-name-input" value="${esc(trip.name)}" />
           <p class="muted">${trip.dayCount || 0} days · ${esc(formatTripDates(trip))}</p>
-          <nav class="loc-nav">${locNav}</nav>
         </header>
-        <section class="planner-section" id="planner-route">
-          <h3>Locations</h3>
-          ${(trip.segments || []).map((s, i) => renderLocationSection(state, trip, s, i)).join("")}
-          <div class="planner-add-seg-form card"${keepSegFormOpen ? " open" : ""}>
-            <strong>Add location</strong>
-            <div class="planner-grid" style="margin-top:0.65rem">
-              <select id="seg-country" class="pill-select">${countryOpts}</select>
-              <input id="seg-city" class="pill-select" placeholder="City" />
-              <label class="field field-inline"><span class="muted">Start</span><input id="seg-start" type="date" class="pill-select" /></label>
-              <label class="field field-inline"><span class="muted">End</span><input id="seg-end" type="date" class="pill-select" /></label>
-              <button type="button" class="btn btn-primary" data-act="add-segment">+ Add location</button>
+        ${renderDayPage(state, trip, activeDayNum)}
+        <details class="route-editor card" ${routeEditorOpen ? "open" : ""}>
+          <summary class="route-editor-summary">Edit locations &amp; dates</summary>
+          <section class="planner-section" id="planner-route">
+            ${(trip.segments || []).map((s, i) => renderLocationSection(state, trip, s, i)).join("")}
+            <div class="planner-add-seg-form card"${keepSegFormOpen ? " open" : ""}>
+              <strong>Add location</strong>
+              <div class="planner-grid" style="margin-top:0.65rem">
+                <select id="seg-country" class="pill-select">${countryOpts}</select>
+                <input id="seg-city" class="pill-select" placeholder="City" />
+                <label class="field field-inline"><span class="muted">Start</span><input id="seg-start" type="date" class="pill-select" /></label>
+                <label class="field field-inline"><span class="muted">End</span><input id="seg-end" type="date" class="pill-select" /></label>
+                <button type="button" class="btn btn-primary" data-act="add-segment">+ Add location</button>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </details>
         ${(trip.suggestions || []).length ? `<section class="planner-section"><h3>Suggestions</h3>
           <ul class="planner-suggestions">${trip.suggestions.map((s) => `
             <li class="planner-suggestion card">
@@ -899,10 +987,12 @@ window.WorldPlanner = (() => {
     if (msg) WorldApp.toast(msg);
   }
 
-  function openTrip(state, tripId, { toast: msg, flush } = {}) {
+  function openTrip(state, tripId, { toast: msg, dayNum } = {}) {
     setActiveTrip(state, tripId);
     showCreate = false;
-    persistLive({ flush, toast: msg, scroll: "#planner-trip-doc" });
+    activeDayNum = dayNum || 1;
+    lastScroll = 0;
+    persistLive({ toast: msg, scroll: "#planner-day-page" });
   }
 
   function onClick(e) {
@@ -930,7 +1020,37 @@ window.WorldPlanner = (() => {
     }
     if (act === "open-trip") {
       e.preventDefault();
+      e.stopPropagation();
+      activeDayNum = 1;
+      lastScroll = 0;
       return openTrip(state, actEl.dataset.tripId);
+    }
+    if (act === "delete-trip") {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = actEl.dataset.tripId;
+      const t = state.planner.trips.find((x) => x.id === id);
+      if (!t) return;
+      if (!confirm(`Delete "${t.name}"? This cannot be undone.`)) return;
+      deleteTrip(state, id);
+      return persistLive({ toast: "Trip deleted", scroll: state.planner.activeTripId ? "#planner-day-page" : undefined });
+    }
+    if (act === "day-go") {
+      activeDayNum = Number(actEl.dataset.day);
+      lastScroll = 0;
+      return persistLive({ scroll: "#planner-day-page" });
+    }
+    if (act === "day-prev") {
+      if (!trip) return;
+      activeDayNum = clampDayNum(trip, activeDayNum - 1);
+      lastScroll = 0;
+      return persistLive({ scroll: "#planner-day-page" });
+    }
+    if (act === "day-next") {
+      if (!trip) return;
+      activeDayNum = clampDayNum(trip, activeDayNum + 1);
+      lastScroll = 0;
+      return persistLive({ scroll: "#planner-day-page" });
     }
     if (act === "add-create-row") {
       const rows = $("new-trip-rows");
@@ -954,8 +1074,11 @@ window.WorldPlanner = (() => {
       const segments = collectCreateRows();
       const name = $("new-trip-name")?.value?.trim() || "My trip";
       if (!segments.length) return WorldApp.toast("Pick at least one country", "warn");
+      activeDayNum = 1;
+      showCreate = false;
+      open = true;
       const created = createTrip(state, { name, segments });
-      return openTrip(state, created.id, { toast: "Trip created — saved on this device" });
+      return openTrip(state, created.id, { toast: "Trip opened" });
     }
     if (act === "save") {
       persistLive({ flush: true, toast: "Trip saved" });
@@ -1006,7 +1129,7 @@ window.WorldPlanner = (() => {
     }
     if (act === "add-item") {
       const dayNum = Number(actEl.dataset.day);
-      const wrap = actEl.closest(".itin-day");
+      const wrap = actEl.closest(".day-add") || actEl.closest(".itin-day");
       const name = wrap?.querySelector(".add-item-name")?.value?.trim();
       if (!name) return WorldApp.toast("Enter a place name", "warn");
       const time = wrap.querySelector(".add-item-time")?.value?.trim() || "";
@@ -1022,7 +1145,23 @@ window.WorldPlanner = (() => {
         id: WorldStore.uid("item"), time, name, notes, category, url: url || place?.url || "",
         placeId: place?.id || "", slot: PlaceCategorize.defaultSlot(category), lat: place?.lat, lng: place?.lng,
       });
-      persistLive({ toast: `Added ${name}`, scroll: `#day-${dayNum}` });
+      persistLive({ toast: `Added ${name}`, scroll: "#planner-day-page" });
+      return;
+    }
+    if (act === "pin-globe") {
+      const dayNum = Number(actEl.dataset.day);
+      const itemId = actEl.dataset.item;
+      const day = trip.days?.[dayNum - 1];
+      const item = itemsOf(day).find((i) => i.id === itemId);
+      if (!item) return;
+      const seg = segmentForDay(trip, dayNum);
+      const place = item.placeId ? (state.places || []).find((p) => p.id === item.placeId) : null;
+      const lat = item.lat ?? place?.lat;
+      const lng = item.lng ?? place?.lng;
+      if (seg?.countryId) WorldApp.selectCountry(seg.countryId);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) WorldGlobe.focusPlace?.(lat, lng);
+      else if (seg?.countryId) WorldGlobe.focusCountry(seg.countryId);
+      WorldApp.toast(`Pinned ${item.name} on globe`);
       return;
     }
     if (act === "item-remove") {
@@ -1040,12 +1179,11 @@ window.WorldPlanner = (() => {
     if (act === "adopt-sug") {
       const sug = trip.suggestions?.find((s) => s.id === actEl.dataset.sug);
       if (!sug) return;
-      adoptSuggestion(state, trip.id, sug, trip.days?.[0]?.day || 1);
-      return persistLive({ toast: "Added" });
+      adoptSuggestion(state, trip.id, sug, activeDayNum);
+      return persistLive({ toast: "Added", scroll: "#planner-day-page" });
     }
     if (act === "suggest") {
-      const d = trip.days?.[0]?.day || 1;
-      localSuggestDay(state, trip, d);
+      localSuggestDay(state, trip, activeDayNum);
       return persistLive({ toast: "Suggestions ready" });
     }
     if (act === "guide-remove") {
@@ -1109,7 +1247,8 @@ window.WorldPlanner = (() => {
       const state = WorldApp.getState();
       const trip = await importDraft(state, draft);
       showCreate = false;
-      persistLive({ toast: `Imported ${draft.rowCount} rows · saved on this device`, scroll: "#planner-trip-doc" });
+      activeDayNum = 1;
+      persistLive({ toast: `Imported ${draft.rowCount} rows · saved on this device`, scroll: "#planner-day-page" });
       return trip;
     } catch (err) {
       WorldApp.toast(err.message || "Import failed", "error");
@@ -1179,8 +1318,9 @@ window.WorldPlanner = (() => {
     if (day && segId) day.segmentId = segId;
     addPlace(state, trip.id, dayNum, slot, pendingPlace, note);
     hideAddToTripModal();
+    activeDayNum = dayNum;
     toggle(true);
-    openTrip(state, trip.id, { flush: true, toast: `Added to day ${dayNum}` });
+    openTrip(state, trip.id, { toast: `Added to day ${dayNum}`, dayNum });
   }
 
   function toggle(on) {
@@ -1190,8 +1330,12 @@ window.WorldPlanner = (() => {
     panel.classList.toggle("open", open);
     panel.hidden = !open;
     if (open) {
-      showCreate = !getActiveTrip(WorldApp.getState()) && !(WorldApp.getState()?.planner?.trips || []).length;
-      render(WorldApp.getState());
+      const st = WorldApp.getState();
+      const planner = ensurePlanner(st);
+      showCreate = !getActiveTrip(st) && !planner.trips.length;
+      const trip = getActiveTrip(st);
+      if (trip) activeDayNum = clampDayNum(trip, activeDayNum);
+      render(st);
     }
   }
 

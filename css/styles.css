@@ -845,6 +845,87 @@ input[type="date"]::-webkit-date-and-time-value {
   width: 100%; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .planner-trip-chips { display: flex; flex-direction: column; gap: 0.45rem; }
+.trip-chip-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+.trip-chip-del { min-width: 44px; min-height: 52px; flex-shrink: 0; }
+.day-page { margin-bottom: 1rem; }
+.day-page-head { padding: 1rem; margin-bottom: 0.65rem; }
+.day-page-kicker { margin: 0 0 0.25rem; font-size: 0.75rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+.day-page-title { margin: 0; font-size: 1.05rem; line-height: 1.35; color: var(--text); }
+.day-nav-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.day-nav-chips {
+  display: flex;
+  gap: 0.3rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.15rem 0;
+}
+.day-nav-chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+  font-size: 0.75rem;
+  min-height: 36px;
+  cursor: pointer;
+}
+.day-nav-chip.active { border-color: var(--accent); background: rgba(124, 240, 255, 0.1); color: var(--accent); }
+.day-category-section { padding: 0.75rem; margin-bottom: 0.65rem; }
+.day-category-title { margin: 0 0 0.55rem; font-size: 0.88rem; color: var(--accent); }
+.activity-list { display: grid; gap: 0.55rem; }
+.activity-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.65rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+.activity-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+  flex-wrap: wrap;
+}
+.activity-cat-badge {
+  font-size: 0.72rem;
+  color: var(--accent);
+  background: rgba(124, 240, 255, 0.08);
+  border: 1px solid rgba(124, 240, 255, 0.2);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+}
+.activity-time { width: 5.5rem; min-height: 36px; font-size: 0.82rem; }
+.activity-name { font-weight: 600; margin-bottom: 0.35rem; }
+.activity-notes { margin-bottom: 0.45rem; font-size: 0.85rem; }
+.activity-card-foot { display: grid; gap: 0.4rem; }
+.activity-cat-select { font-size: 0.82rem; }
+.activity-card-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.day-add { padding: 0.75rem; margin-top: 0.5rem; }
+.day-add-grid { display: grid; gap: 0.45rem; margin-top: 0.55rem; }
+.day-empty { padding: 0.5rem 0.25rem; }
+.route-editor { margin: 0.75rem 0; padding: 0; overflow: hidden; }
+.route-editor-summary {
+  cursor: pointer;
+  padding: 0.75rem 0.9rem;
+  font-weight: 600;
+  list-style: none;
+}
+.route-editor[open] .route-editor-summary { border-bottom: 1px solid var(--border); }
+.route-editor .planner-section { padding: 0.75rem; }
 .trip-chip {
   width: 100%;
   text-align: left;

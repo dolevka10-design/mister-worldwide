@@ -354,6 +354,11 @@ window.WorldGlobe = (() => {
     globe.pointOfView({ lat: center.lat, lng: center.lng, altitude: 1.55 }, 1200);
   }
 
+  function focusPlace(lat, lng, { altitude = 1.65, duration = 1200 } = {}) {
+    if (!globe || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    globe.pointOfView({ lat, lng, altitude }, duration);
+  }
+
   function onResize() {
     if (!globe || !container) return;
     const w = container.clientWidth;
@@ -387,6 +392,7 @@ window.WorldGlobe = (() => {
     init,
     updatePins,
     focusCountry,
+    focusPlace,
     destroy,
     resize,
     isReady,
