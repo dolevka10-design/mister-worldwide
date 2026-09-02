@@ -423,10 +423,9 @@ html, body {
 .globe-flag-count { font-size: 0.55rem; }
 
 .globe-city-pin {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.1rem;
+  position: relative;
+  width: 8px;
+  height: 8px;
   cursor: pointer;
   border: none;
   background: transparent;
@@ -434,23 +433,36 @@ html, body {
   margin: 0;
   font: inherit;
   color: inherit;
-  transform: translate(-50%, -100%);
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
-  transition: transform 0.15s ease;
-  max-width: 7.5rem;
+  transition: filter 0.15s ease;
 }
 .globe-city-pin:hover {
-  transform: translate(-50%, -100%) scale(1.08);
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.7));
   z-index: 9;
 }
 .globe-city-dot {
-  width: 7px;
-  height: 7px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--accent);
   border: 1.5px solid rgba(255, 255, 255, 0.95);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-  flex-shrink: 0;
+  transform: translate(-50%, -50%);
+}
+.globe-city-stack {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  max-width: 7.5rem;
+  pointer-events: none;
 }
 .globe-city-label {
   font-size: 0.62rem;

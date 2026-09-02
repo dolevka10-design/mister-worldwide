@@ -28,8 +28,9 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const TILE_MAX_ALT = 2.5;
-  const TILE_MIN_ALT = 0.72;
+  const TILE_ON_ALT = 1.15;
+  const TILE_OFF_ALT = 1.28;
+  const TILE_MIN_ALT = 0.68;
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
@@ -169,18 +170,19 @@ window.WorldGlobe = (() => {
   }
 
   function maxTileLevelForAltitude(alt) {
-    if (!Number.isFinite(alt) || alt >= TILE_MAX_ALT) return 0;
+    if (!Number.isFinite(alt)) return 0;
+    if (tilesActive ? alt >= TILE_OFF_ALT : alt >= TILE_ON_ALT) return 0;
     const mobile = isMobileViewport();
     const cap = mobile ? 14 : 15;
-    const minLevel = 7;
-    const t = smoothstep((TILE_MAX_ALT - alt) / (TILE_MAX_ALT - TILE_MIN_ALT));
+    const minLevel = 9;
+    const t = smoothstep((TILE_ON_ALT - alt) / (TILE_ON_ALT - TILE_MIN_ALT));
     return Math.round(minLevel + t * (cap - minLevel));
   }
 
   function tileCurvatureForAltitude(alt) {
-    if (!Number.isFinite(alt) || alt >= TILE_MAX_ALT) return 5;
-    if (alt <= 1.1) return 3;
-    if (alt <= 1.6) return 4;
+    if (!Number.isFinite(alt) || alt >= TILE_OFF_ALT) return 5;
+    if (alt <= 1.0) return 3;
+    if (alt <= 1.12) return 4;
     return 5;
   }
 
@@ -251,6 +253,7 @@ window.WorldGlobe = (() => {
     if (!globe) return;
     disableZoomTiles();
     globe.pointOfView({ ...DEFAULT_POV }, duration);
+    scheduleZoomTileSync();
   }
 
   function bindHomeButton() {
@@ -297,6 +300,14 @@ window.WorldGlobe = (() => {
     cityPinRefreshTimer = setTimeout(refreshCityPinsForView, delay);
   }
 
+  function applyPinLayerSettings(mode) {
+    if (!globe) return;
+    const city = mode === "city";
+    globe
+      .htmlAltitude(city ? 0 : 0.04)
+      .htmlTransitionDuration(0);
+  }
+
   function refreshCityPinsForView() {
     if (!globe || dayMode || pinViewMode !== "city" || !pinsVisible) return;
     allCityPinsCache = getAllCityPins?.() || allCityPinsCache;
@@ -305,6 +316,7 @@ window.WorldGlobe = (() => {
       showCountryFlagPins();
       return;
     }
+    applyPinLayerSettings("city");
     globe
       .htmlElement((d) => makeCityPin(d))
       .htmlElementsData(pins);
@@ -415,9 +427,11 @@ window.WorldGlobe = (() => {
     el.setAttribute("aria-label", `${d.city}, ${d.placeCount} places`);
     const shortCity = d.city.length > 14 ? `${d.city.slice(0, 12)}…` : d.city;
     el.innerHTML = `
-      <span class="globe-city-label">${shortCity}</span>
-      <span class="globe-city-count">${d.placeCount}</span>
-      <span class="globe-city-dot" aria-hidden="true"></span>`;
+      <span class="globe-city-dot" aria-hidden="true"></span>
+      <span class="globe-city-stack">
+        <span class="globe-city-label">${shortCity}</span>
+        <span class="globe-city-count">${d.placeCount}</span>
+      </span>`;
     return el;
   }
 
@@ -546,6 +560,7 @@ window.WorldGlobe = (() => {
   function showCountryFlagPins() {
     if (!globe) return;
     const data = pinsVisible ? pinData(countries) : [];
+    applyPinLayerSettings("country");
     globe.htmlElement((d) => makeFlagPin(d)).htmlElementsData(data);
   }
 
@@ -672,6 +687,7 @@ window.WorldGlobe = (() => {
       .htmlLat("lat")
       .htmlLng("lng")
       .htmlAltitude(0.04)
+      .htmlTransitionDuration(0)
       .htmlElement((d) => makeFlagPin(d));
 
     bindControls(globe.controls());

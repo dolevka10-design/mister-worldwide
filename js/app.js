@@ -18,7 +18,7 @@ window.WorldApp = (() => {
   let placeIdFilter = null;
   let dayPanelLabel = "";
   let placeIdOrder = [];
-  const CITY_CENTER_KEY = "mister-worldwide-city-centers";
+  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v2";
   const cityCenterCache = new Map();
   let cityCenterResolveGen = 0;
 
@@ -287,12 +287,15 @@ window.WorldApp = (() => {
     const q = [city, countryName].filter(Boolean).join(", ");
     if (!q) return null;
     try {
-      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6`);
+      const res = await fetch(
+        `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&lang=en&osm_tag=place:city&osm_tag=place:town&osm_tag=place:municipality`
+      );
       if (!res.ok) return null;
       const data = await res.json();
       const features = data?.features || [];
       const cityLower = city.toLowerCase();
-      const preferredTypes = new Set(["city", "town", "municipality", "locality", "district", "borough"]);
+      const countryLower = String(countryName || "").toLowerCase();
+      const preferredTypes = new Set(["city", "town", "municipality", "borough", "locality"]);
       const ranked = features
         .map((f) => {
           const [lng, lat] = f.geometry?.coordinates || [];
@@ -300,17 +303,20 @@ window.WorldApp = (() => {
           const p = f.properties || {};
           const name = String(p.name || p.city || "").toLowerCase();
           const type = String(p.type || p.osm_value || "").toLowerCase();
+          const featureCountry = String(p.country || "").toLowerCase();
           let score = 0;
-          if (name === cityLower) score += 8;
-          else if (name.includes(cityLower) || cityLower.includes(name)) score += 4;
+          if (name === cityLower) score += 10;
+          else if (name.startsWith(cityLower) || cityLower.startsWith(name)) score += 6;
+          else if (name.includes(cityLower) || cityLower.includes(name)) score += 3;
           if (preferredTypes.has(type)) score += 5;
-          if (p.country && countryName && String(p.country).toLowerCase() === countryName.toLowerCase()) score += 3;
+          if (countryLower && featureCountry === countryLower) score += 6;
+          else if (countryLower && featureCountry.includes(countryLower)) score += 2;
           return { lat, lng, score };
         })
         .filter(Boolean)
         .sort((a, b) => b.score - a.score);
       for (const hit of ranked) {
-        if (hit.score < 4) continue;
+        if (hit.score < 8) continue;
         if (!nearPlaceCluster(hit, places)) continue;
         return { lat: hit.lat, lng: hit.lng };
       }
