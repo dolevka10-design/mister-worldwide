@@ -20,14 +20,22 @@ window.WorldGlobe = (() => {
   const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
   const EARTH_TEX_CDN = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
   const EARTH_TEX_LOCAL = "assets/textures/earth.jpg";
+  const EARTH_TILE_URL =
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{l}/{y}/{x}";
   const ROTATE_KEY = "mister-worldwide-globe-rotate";
   const PIN_VIEW_KEY = "mister-worldwide-globe-pin-view";
   const ROTATE_SPEED = 0.4;
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
+  const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
+  const TILE_ENABLE_ALT = 2.05;
+  const TILE_DISABLE_ALT = 2.18;
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
+  let tileSyncTimer = null;
+  let tilesActive = false;
+  let tileMaxLevel = 0;
   let allCityPinsCache = [];
 
   function loadRotatePref() {
@@ -145,6 +153,94 @@ window.WorldGlobe = (() => {
       ranked = [...pool].sort((a, b) => (b.placeCount || 0) - (a.placeCount || 0));
     }
     return ranked.slice(0, MAX_CITY_PINS);
+  }
+
+  function isMobileViewport() {
+    return window.matchMedia?.("(max-width: 768px)")?.matches || false;
+  }
+
+  function tileUrlFor(x, y, l) {
+    return EARTH_TILE_URL.replace("{x}", x).replace("{y}", y).replace("{l}", l);
+  }
+
+  function maxTileLevelForAltitude(alt) {
+    if (!Number.isFinite(alt)) return 10;
+    const mobile = isMobileViewport();
+    if (alt <= 1.0) return mobile ? 13 : 14;
+    if (alt <= 1.35) return mobile ? 12 : 13;
+    if (alt <= 1.65) return 11;
+    return 10;
+  }
+
+  function disableZoomTiles() {
+    if (!globe || !tilesActive) return;
+    try {
+      globe.globeTileEngineUrl(null);
+    } catch (e) {
+      console.warn("Disable globe tiles failed", e);
+    }
+    tilesActive = false;
+    tileMaxLevel = 0;
+  }
+
+  function enableZoomTiles(level) {
+    if (!globe) return;
+    const nextLevel = Math.max(8, level || 10);
+    try {
+      if (!tilesActive) {
+        globe.globeTileEngineMaxLevel(nextLevel);
+        globe.globeTileEngineUrl(tileUrlFor);
+        tilesActive = true;
+        tileMaxLevel = nextLevel;
+        return;
+      }
+      if (nextLevel !== tileMaxLevel) {
+        globe.globeTileEngineMaxLevel(nextLevel);
+        tileMaxLevel = nextLevel;
+      }
+    } catch (e) {
+      console.warn("Enable globe tiles failed", e);
+    }
+  }
+
+  function syncZoomTiles() {
+    if (!globe) return;
+    const pov = globe.pointOfView?.() || DEFAULT_POV;
+    const alt = pov.altitude;
+    if (tilesActive && alt >= TILE_DISABLE_ALT) {
+      disableZoomTiles();
+      return;
+    }
+    if (!tilesActive && alt < TILE_ENABLE_ALT) {
+      enableZoomTiles(maxTileLevelForAltitude(alt));
+      return;
+    }
+    if (tilesActive) {
+      const nextLevel = maxTileLevelForAltitude(alt);
+      if (nextLevel !== tileMaxLevel) enableZoomTiles(nextLevel);
+    }
+  }
+
+  function scheduleZoomTileSync(delay = 200) {
+    clearTimeout(tileSyncTimer);
+    tileSyncTimer = setTimeout(syncZoomTiles, delay);
+  }
+
+  function resetDefaultView({ duration = 900 } = {}) {
+    if (!globe) return;
+    disableZoomTiles();
+    globe.pointOfView({ ...DEFAULT_POV }, duration);
+  }
+
+  function bindHomeButton() {
+    const btn = document.getElementById("btn-globe-home");
+    if (!btn || btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resetDefaultView();
+    });
   }
 
   function applyGlobeQuality() {
@@ -486,12 +582,17 @@ window.WorldGlobe = (() => {
       setTimeout(() => {
         globeDragging = false;
         scheduleCityPinRefresh(80);
+        scheduleZoomTileSync(60);
       }, 60);
     });
     controls.addEventListener("change", () => {
       scheduleCityPinRefresh(220);
+      scheduleZoomTileSync(180);
     });
     applyAutoRotate();
+    globe.onZoom?.(() => {
+      scheduleZoomTileSync(120);
+    });
   }
 
   async function init(el, opts = {}) {
@@ -511,6 +612,7 @@ window.WorldGlobe = (() => {
       onResize();
       syncRotateButton();
       syncPinViewButton();
+      bindHomeButton();
       return globe;
     }
 
@@ -519,6 +621,7 @@ window.WorldGlobe = (() => {
     bindPinClicks(el);
     bindRotateToggle();
     bindPinViewToggle();
+    bindHomeButton();
 
     globe = Globe()
       .globeImageUrl(EARTH_TEX_CDN)
@@ -598,6 +701,7 @@ window.WorldGlobe = (() => {
     if (w <= 0 || h <= 0) return;
     globe.width(w).height(h);
     applyGlobeQuality();
+    scheduleZoomTileSync(80);
     scheduleCityPinRefresh(120);
   }
 
@@ -611,6 +715,8 @@ window.WorldGlobe = (() => {
 
   function destroy() {
     clearTimeout(cityPinRefreshTimer);
+    clearTimeout(tileSyncTimer);
+    disableZoomTiles();
     window.removeEventListener("resize", onResize);
     if (resizeObserver) resizeObserver.disconnect();
     resizeObserver = null;
@@ -640,5 +746,6 @@ window.WorldGlobe = (() => {
     setAutoRotate,
     isAutoRotate: () => autoRotateEnabled,
     setPinsVisible,
+    resetDefaultView,
   };
 })();
