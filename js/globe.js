@@ -18,13 +18,17 @@ window.WorldGlobe = (() => {
   const TAP_MAX_MS = 400;
 
   const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
-  const EARTH_TEX_CDN = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
   const EARTH_TEX_LOCAL = "assets/textures/earth.jpg";
+  const EARTH_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{l}/{y}/{x}";
   const ROTATE_KEY = "mister-worldwide-globe-rotate";
   const PIN_VIEW_KEY = "mister-worldwide-globe-pin-view";
   const ROTATE_SPEED = 0.4;
+  const MAX_CITY_PINS = 120;
+  const CITY_PIN_MIN_PLACES = 2;
 
   let lastSelectAt = 0;
+  let cityPinRefreshTimer = null;
+  let allCityPinsCache = [];
 
   function loadRotatePref() {
     try {
@@ -113,6 +117,71 @@ window.WorldGlobe = (() => {
       setPinViewMode(pinViewMode === "city" ? "country" : "city");
     });
     syncPinViewButton();
+  }
+
+  function angularDistance(lat1, lng1, lat2, lng2) {
+    const dLat = lat2 - lat1;
+    let dLng = lng2 - lng1;
+    while (dLng > 180) dLng -= 360;
+    while (dLng < -180) dLng += 360;
+    return Math.hypot(dLat, dLng);
+  }
+
+  function viewRadiusDeg(alt) {
+    if (!Number.isFinite(alt)) return 90;
+    return Math.min(95, Math.max(18, 52 / Math.sqrt(Math.max(alt, 0.55))));
+  }
+
+  function filterCityPinsForView(pins) {
+    if (!globe || !pins?.length) return [];
+    const pov = globe.pointOfView?.() || { lat: 0, lng: 0, altitude: 2.5 };
+    const radius = viewRadiusDeg(pov.altitude);
+    const visible = pins.filter((p) => angularDistance(pov.lat, pov.lng, p.lat, p.lng) <= radius);
+    const pool = visible.length ? visible : pins;
+    let ranked = pool
+      .filter((p) => (p.placeCount || 0) >= CITY_PIN_MIN_PLACES)
+      .sort((a, b) => (b.placeCount || 0) - (a.placeCount || 0));
+    if (!ranked.length) {
+      ranked = [...pool].sort((a, b) => (b.placeCount || 0) - (a.placeCount || 0));
+    }
+    return ranked.slice(0, MAX_CITY_PINS);
+  }
+
+  function applyGlobeQuality() {
+    if (!globe) return;
+    const renderer = globe.renderer?.();
+    if (renderer) {
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      const maxAniso = renderer.capabilities?.getMaxAnisotropy?.() || 8;
+      const mat = globe.globeMaterial?.();
+      const map = mat?.map;
+      if (map) {
+        map.anisotropy = maxAniso;
+        map.minFilter = 1003; // THREE.LinearMipmapLinearFilter
+        map.magFilter = 1006; // THREE.LinearFilter
+        map.generateMipmaps = true;
+        map.needsUpdate = true;
+      }
+    }
+  }
+
+  function scheduleCityPinRefresh(delay = 180) {
+    if (pinViewMode !== "city" || dayMode) return;
+    clearTimeout(cityPinRefreshTimer);
+    cityPinRefreshTimer = setTimeout(refreshCityPinsForView, delay);
+  }
+
+  function refreshCityPinsForView() {
+    if (!globe || dayMode || pinViewMode !== "city" || !pinsVisible) return;
+    allCityPinsCache = getAllCityPins?.() || allCityPinsCache;
+    const pins = filterCityPinsForView(allCityPinsCache);
+    if (!pins.length) {
+      showCountryFlagPins();
+      return;
+    }
+    globe
+      .htmlElement((d) => makeCityPin(d))
+      .htmlElementsData(pins);
   }
 
   function selectCountry(countryId) {
@@ -355,14 +424,12 @@ window.WorldGlobe = (() => {
 
   function showAllCityPins() {
     if (!globe) return;
-    const pins = getAllCityPins?.() || [];
-    if (!pins.length) {
+    allCityPinsCache = getAllCityPins?.() || [];
+    if (!allCityPinsCache.length) {
       showCountryFlagPins();
       return;
     }
-    globe
-      .htmlElement((d) => makeCityPin(d))
-      .htmlElementsData(pins);
+    refreshCityPinsForView();
   }
 
   function applyPinView() {
@@ -409,7 +476,11 @@ window.WorldGlobe = (() => {
     controls.addEventListener("end", () => {
       setTimeout(() => {
         globeDragging = false;
+        scheduleCityPinRefresh(80);
       }, 60);
+    });
+    controls.addEventListener("change", () => {
+      scheduleCityPinRefresh(220);
     });
     applyAutoRotate();
   }
@@ -441,7 +512,9 @@ window.WorldGlobe = (() => {
     bindPinViewToggle();
 
     globe = Globe()
-      .globeImageUrl(EARTH_TEX_CDN)
+      .globeImageUrl(EARTH_TEX_LOCAL)
+      .globeTileEngineUrl((x, y, l) => EARTH_TILE_URL.replace("{x}", x).replace("{y}", y).replace("{l}", l))
+      .globeCurvatureResolution(2)
       .showGlobe(true)
       .showAtmosphere(true)
       .atmosphereColor("#7cf0ff")
@@ -450,9 +523,7 @@ window.WorldGlobe = (() => {
       .width(Math.max(el.clientWidth, 1))
       .height(Math.max(el.clientHeight, 320))(el);
 
-    const img = new Image();
-    img.onload = () => { if (globe) globe.globeImageUrl(EARTH_TEX_LOCAL); };
-    img.src = EARTH_TEX_LOCAL;
+    applyGlobeQuality();
 
     globe
       .polygonsData([])
@@ -484,6 +555,7 @@ window.WorldGlobe = (() => {
     onResize();
     syncRotateButton();
     syncPinViewButton();
+    setTimeout(applyGlobeQuality, 400);
 
     return globe;
   }
@@ -518,6 +590,8 @@ window.WorldGlobe = (() => {
     const h = container.clientHeight;
     if (w <= 0 || h <= 0) return;
     globe.width(w).height(h);
+    applyGlobeQuality();
+    scheduleCityPinRefresh(120);
   }
 
   function resize() {
@@ -529,6 +603,7 @@ window.WorldGlobe = (() => {
   }
 
   function destroy() {
+    clearTimeout(cityPinRefreshTimer);
     window.removeEventListener("resize", onResize);
     if (resizeObserver) resizeObserver.disconnect();
     resizeObserver = null;

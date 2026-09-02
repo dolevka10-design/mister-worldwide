@@ -22,7 +22,7 @@ const out = path.join(__dirname, "..", "assets", "models", "earth.glb");
 
 const scene = new THREE.Scene();
 const mesh = new THREE.Mesh(
-  new THREE.SphereGeometry(1, 64, 64),
+  new THREE.SphereGeometry(1, 128, 128),
   new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.05 })
 );
 mesh.name = "Earth";

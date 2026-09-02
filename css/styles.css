@@ -208,15 +208,48 @@ html, body {
 .brand-block { min-width: 0; flex: 1; }
 .topbar-row-main .brand-block { padding-right: 0.25rem; }
 .topbar-row-meta {
-  flex-wrap: wrap;
-  gap: 0.35rem 0.65rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
 }
-.topbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-left: auto; }
+.topbar-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.topbar-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.28rem;
+  margin-left: 0;
+  flex-shrink: 0;
+  max-width: 58vw;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.topbar-actions::-webkit-scrollbar { display: none; }
 .topbar-logout { flex-shrink: 0; }
-.topbar-actions .btn:not(#btn-planner):not(#btn-import-maps):not(#btn-logout) { display: none; }
+.topbar-actions .btn:not(#btn-planner):not(#btn-import-maps):not(#btn-theme-toggle):not(#btn-logout) { display: none; }
+.theme-toggle {
+  flex-shrink: 0;
+  min-width: 2.1rem;
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+  font-size: 1rem;
+  line-height: 1;
+}
 .topbar-logout { padding: 0.3rem 0.55rem; font-size: 0.75rem; }
-.stats { display: flex; gap: 0.5rem; font-size: 0.72rem; color: var(--muted); flex-shrink: 0; }
-.user-chip { font-size: 0.68rem; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.stats { display: flex; gap: 0.5rem; font-size: 0.72rem; color: var(--muted); flex-shrink: 0; white-space: nowrap; }
+.user-chip { font-size: 0.68rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+
+@media (max-width: 420px) {
+  .user-chip { display: none; }
+}
 
 .globe-layout {
   flex: 1;
@@ -514,13 +547,6 @@ html, body {
   cursor: pointer;
 }
 .tab.active { color: var(--text); border-color: var(--accent); background: var(--tab-active-bg); }
-.theme-toggle {
-  min-width: 2.25rem;
-  padding-left: 0.55rem;
-  padding-right: 0.55rem;
-  font-size: 1rem;
-  line-height: 1;
-}
 .trip-activity-card .place-main { min-width: 0; }
 .panel-body { flex: 1; overflow: auto; padding: 0.75rem 1rem 2rem; }
 .place-group { margin-bottom: 1.25rem; }
