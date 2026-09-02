@@ -1214,39 +1214,33 @@ window.WorldPlanner = (() => {
 
   function tripExportRows(state, trip) {
     const rows = [];
+    let ord = 0;
     for (const day of trip.days || []) {
       const seg = segmentForDay(trip, day.day);
       const country = state.countries.find((c) => c.id === seg?.countryId);
       const items = itemsOf(day);
       const dayLabel = day.importDay || day.day;
-      if (!items.length) {
-        rows.push({
-          date: day.date || "",
-          day: dayLabel,
-          location: seg?.city || "Other",
-          time: "",
-          place: "",
-          notes: "",
-          category: "",
-          url: "",
-          placeholder: true,
-        });
-        continue;
-      }
       for (const item of items) {
         const city = item.importLocation || seg?.city || "Other";
         const itemSeg = (trip.segments || []).find((s) => s.city === city) || seg;
         const countryName = (state.countries.find((c) => c.id === itemSeg?.countryId) || country)?.name;
+        const place = item.placeholder || item.name === "—" ? "" : (item.name || "");
+        const notes = item.notes || "";
+        const time = item.time || "";
+        const category = item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category) || "";
+        if (!place && !notes && !time) continue;
+        if (!place && /^places$/i.test(category)) continue;
         rows.push({
           date: item.importDate || day.date || "",
           day: item.importDay || dayLabel,
           location: city,
-          time: item.time || "",
-          place: item.placeholder || item.name === "—" ? "" : (item.name || ""),
-          notes: item.notes || "",
-          category: item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category) || "",
+          time,
+          place,
+          notes,
+          category,
           url: item.url || mapsHref(item, city, countryName),
           placeholder: !!(item.placeholder || item.name === "—"),
+          _ord: ord++,
         });
       }
     }
@@ -1280,23 +1274,12 @@ window.WorldPlanner = (() => {
     const stem = (trip.name || "trip").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "trip";
     const csv = WorldPlannerImport.exportCsv(pack);
     const pdf = WorldPlannerImport.exportPdf(pack);
-    let xlsxBuf = null;
-    try {
-      if (typeof XLSX !== "undefined") xlsxBuf = WorldPlannerImport.exportXlsx(pack);
-    } catch (e) {
-      console.warn("xlsx export failed", e);
-    }
     if (typeof JSZip !== "undefined") {
       const zip = new JSZip();
       zip.file(`${stem}.csv`, csv);
       zip.file(`${stem}.pdf`, pdf);
-      if (xlsxBuf) zip.file(`${stem}.xlsx`, xlsxBuf);
       const blob = await zip.generateAsync({ type: "blob" });
       downloadBlob(`${stem}-itinerary.zip`, blob);
-      return;
-    }
-    if (xlsxBuf) {
-      downloadBlob(`${stem}-itinerary.xlsx`, new Blob([xlsxBuf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
       return;
     }
     downloadBlob(`${stem}-itinerary.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -1756,7 +1739,7 @@ window.WorldPlanner = (() => {
             </li>`).join("")}</ul></section>` : ""}
         <footer class="planner-footer">
           <button type="button" class="btn btn-secondary" data-act="suggest" onclick="WorldPlanner.act(event)">Quick suggest</button>
-          <button type="button" class="btn btn-secondary" data-act="export" onclick="WorldPlanner.act(event)">Export CSV/PDF/Excel</button>
+          <button type="button" class="btn btn-secondary" data-act="export" onclick="WorldPlanner.act(event)">Export CSV/PDF</button>
           <button type="button" class="btn btn-primary" data-act="save" onclick="WorldPlanner.act(event)">Save trip</button>
         </footer>
       </article>`;
@@ -1988,7 +1971,7 @@ window.WorldPlanner = (() => {
     if (act === "export") {
       if (!trip) return;
       Promise.resolve(downloadTripExcel(state, trip))
-        .then(() => WorldApp.toast("Exported CSV, PDF, and Excel"))
+        .then(() => WorldApp.toast("Exported CSV and PDF"))
         .catch((err) => {
           console.warn("Export failed", err);
           WorldApp.toast(err.message || "Export failed", "error");

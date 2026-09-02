@@ -1363,136 +1363,95 @@ window.WorldPlannerImport = (() => {
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }
 
-  function buildExportPack({ title, dayCount, rows, guides, maxRowsPerPage } = {}) {
-    const tripTitle = String(title || "Imported trip").replace(/\s*total\s*days.*/i, "").trim() || "Imported trip";
-    const allRows = (rows || []).map((r) => ({
-      date: fmtExportDate(r.date),
+  function isExportableRow(r) {
+    const place = norm(r.place);
+    const notes = norm(r.notes);
+    const time = norm(r.time);
+    const url = extractUrl(r.url) || norm(r.url);
+    const cat = norm(r.category);
+    if (place && place !== "—" && place !== "-") return true;
+    if (notes) return true;
+    if (time && isTimeOnly(time)) return true;
+    if (r.placeholder && !place) return false;
+    if (!place && !notes && !time) return false;
+    if (/^places$/i.test(cat) && !place) return false;
+    return false;
+  }
+
+  function normalizeExportRow(r, ord = 0) {
+    const dateRaw = r.date || "";
+    const parsedDate = parsePlannerDate(dateRaw);
+    return {
+      date: fmtExportDate(dateRaw),
       day: exportDayLabel(r.day),
       location: cleanCity(r.location) || "Other",
-      time: isTimeOnly(r.time) ? norm(r.time) : "",
+      time: isTimeOnly(r.time) ? norm(r.time) : norm(r.time),
       place: r.placeholder ? "" : norm(r.place),
       notes: norm(r.notes),
       category: norm(r.category),
       url: extractUrl(r.url) || (/^https?:\/\//i.test(norm(r.url)) ? norm(r.url) : ""),
-    }));
-    const byCity = [];
-    const idx = new Map();
-    for (const row of allRows) {
-      const city = row.location || "Other";
-      if (!idx.has(city)) {
-        idx.set(city, byCity.length);
-        byCity.push({ city, rows: [] });
-      }
-      byCity[idx.get(city)].rows.push(row);
-    }
-    const limit = Number(maxRowsPerPage) > 0 ? Number(maxRowsPerPage) : PDF_ROWS_PER_PAGE;
-    const pages = [];
-    const totalDays = Number(dayCount) > 0 ? Number(dayCount) : new Set(allRows.map((r) => r.date || r.day).filter(Boolean)).size;
-    pages.push({
-      kind: "overview",
-      title: `${tripTitle} Trip Planner Total Days ${totalDays || byCity.length}`,
-      city: "",
-      rows: [],
-      guides: [],
+      _ord: ord,
+      _sortDate: parsedDate || dateRaw || "",
+      _sortDay: parseDayNum(r.day) ?? 9999,
+    };
+  }
+
+  function sortExportRows(rows) {
+    return [...rows].sort((a, b) => {
+      const da = a._sortDate || "";
+      const db = b._sortDate || "";
+      if (da && db && da !== db) return da.localeCompare(db);
+      if (da && !db) return -1;
+      if (!da && db) return 1;
+      if (a._sortDay !== b._sortDay) return a._sortDay - b._sortDay;
+      return (a._ord || 0) - (b._ord || 0);
     });
-    for (const group of byCity) {
-      const chunks = [];
-      for (let i = 0; i < group.rows.length || !chunks.length; i += limit) {
-        chunks.push(group.rows.slice(i, i + limit));
-        if (!group.rows.length) break;
-      }
-      chunks.forEach((chunk, i) => {
-        pages.push({
-          kind: i === 0 ? "itinerary" : "continuation",
-          title: i === 0 ? `${group.city} Itinerary` : `${group.city} (continued)`,
-          city: group.city,
-          rows: chunk,
-          guides: [],
-        });
-      });
-    }
-    for (const g of guides || []) {
-      const city = cleanCity(g.city) || "";
-      const heading = /getting\s*around/i.test(g.title || "")
-        ? String(g.title).trim()
-        : (city ? `Getting Around ${city}` : (g.title || "Getting Around"));
-      pages.push({
-        kind: "guide",
-        title: heading,
-        city,
-        rows: [],
-        guides: [{ title: heading, body: norm(g.body), city }],
-      });
-    }
+  }
+
+  function stripExportMeta(row) {
+    const { _ord, _sortDate, _sortDay, ...out } = row;
+    return out;
+  }
+
+  function buildExportPack({ title, dayCount, rows, guides } = {}) {
+    const tripTitle = String(title || "Imported trip").replace(/\s*total\s*days.*/i, "").trim() || "Imported trip";
+    const normalized = (rows || [])
+      .map((r, i) => normalizeExportRow(r, r._ord ?? i))
+      .filter(isExportableRow);
+    const sorted = sortExportRows(normalized).map(stripExportMeta);
+    const totalDays = Number(dayCount) > 0
+      ? Number(dayCount)
+      : new Set(sorted.map((r) => r.date || r.day).filter(Boolean)).size;
     return {
       title: tripTitle,
       dayCount: totalDays,
-      pages,
-      rows: allRows,
+      rows: sorted,
       guides: (guides || []).map((g) => ({ title: g.title, body: g.body, city: g.city || "" })),
     };
   }
 
   function exportCsv(pack) {
-    const lines = [];
-    const cover = pack.pages.find((p) => p.kind === "overview");
-    if (cover?.title) lines.push(cover.title);
-    let headerWritten = false;
-    for (const page of pack.pages || []) {
-      if (page.kind === "overview") continue;
-      if (page.kind === "guide") {
-        const g = page.guides?.[0];
-        if (!g) continue;
-        lines.push("");
-        lines.push(g.title || page.title);
-        if (g.body) {
-          for (const bodyLine of String(g.body).split(/\r?\n/)) lines.push(bodyLine);
-        }
-        continue;
-      }
-      if (page.city) lines.push(`${page.city} Itinerary`);
-      if (!headerWritten) {
-        lines.push(EXPORT_HEADER.map(csvEscape).join(","));
-        headerWritten = true;
-      }
-      for (const r of page.rows || []) {
-        lines.push([r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url].map(csvEscape).join(","));
-      }
-    }
+    const titleLine = `${pack.title}${pack.dayCount ? ` · ${pack.dayCount} days` : ""} · ${pack.rows.length} activities`;
+    const lines = [
+      titleLine,
+      EXPORT_HEADER.map(csvEscape).join(","),
+      ...(pack.rows || []).map((r) =>
+        [r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url].map(csvEscape).join(",")
+      ),
+    ];
     return `\uFEFF${lines.join("\n")}\n`;
   }
 
   function exportXlsxSheets(pack) {
-    const used = new Set();
-    const sheets = [];
-    const cover = pack.pages.find((p) => p.kind === "overview");
-    sheets.push({
-      name: excelSheetName("Overview", used),
-      kind: "overview",
-      aoa: [[cover?.title || `${pack.title} Trip Planner Total Days ${pack.dayCount || ""}`]],
-    });
-    const cityRows = new Map();
-    for (const page of pack.pages || []) {
-      if (page.kind !== "itinerary" && page.kind !== "continuation") continue;
-      const city = page.city || "Other";
-      if (!cityRows.has(city)) cityRows.set(city, []);
-      cityRows.get(city).push(...(page.rows || []));
-    }
-    for (const [city, rows] of cityRows) {
-      const aoa = [
-        [`${city} Itinerary`],
+    return [{
+      name: "Itinerary",
+      kind: "itinerary",
+      aoa: [
+        [`${pack.title}${pack.dayCount ? ` · ${pack.dayCount} days` : ""} · ${(pack.rows || []).length} activities`],
         EXPORT_HEADER,
-        ...rows.map((r) => [r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url]),
-      ];
-      sheets.push({ name: excelSheetName(`${city} Itinerary`, used), kind: "itinerary", aoa });
-    }
-    for (const page of pack.pages || []) {
-      if (page.kind !== "guide") continue;
-      const g = page.guides?.[0];
-      const aoa = [[g?.title || page.title], ...(String(g?.body || "").split(/\r?\n/).map((line) => [line]))];
-      sheets.push({ name: excelSheetName(g?.title || page.title || "Getting Around", used), kind: "guide", aoa });
-    }
-    return sheets;
+        ...(pack.rows || []).map((r) => [r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url]),
+      ],
+    }];
   }
 
   function exportXlsx(pack) {
@@ -1534,40 +1493,31 @@ window.WorldPlannerImport = (() => {
 
   function layoutExportPdfPages(pack) {
     const pages = [];
-    for (const page of pack.pages || []) {
+    const title = `${pack.title}${pack.dayCount ? ` · ${pack.dayCount} days` : ""} · ${(pack.rows || []).length} activities`;
+    const rowsPerPage = 30;
+    const chunks = [];
+    for (let i = 0; i < (pack.rows || []).length || !chunks.length; i += rowsPerPage) {
+      chunks.push((pack.rows || []).slice(i, i + rowsPerPage));
+      if (!(pack.rows || []).length) break;
+    }
+    chunks.forEach((chunk, pageIdx) => {
       const items = [];
-      if (page.kind === "overview") {
-        items.push({ x: PDF_COL_X[0], y: 520, str: page.title || pack.title, size: 16 });
-        items.push({ x: PDF_COL_X[0], y: 490, str: "Cover page", size: 11 });
-        pages.push({ kind: page.kind, title: page.title, items });
-        continue;
+      if (pageIdx === 0) {
+        items.push({ x: PDF_COL_X[0], y: 580, str: title, size: 13 });
+        EXPORT_HEADER.forEach((h, i) => items.push({ x: PDF_COL_X[i], y: 556, str: h, size: 8 }));
       }
-      if (page.kind === "guide") {
-        const g = page.guides?.[0];
-        items.push({ x: PDF_COL_X[0], y: 560, str: g?.title || page.title, size: 14 });
-        let y = 536;
-        for (const line of wrapText(g?.body || "", 90)) {
-          items.push({ x: PDF_COL_X[0], y, str: line, size: 10 });
-          y -= 14;
-          if (y < 40) break;
-        }
-        pages.push({ kind: page.kind, title: page.title, items });
-        continue;
-      }
-      items.push({ x: PDF_COL_X[0], y: 580, str: `${page.city || "Trip"} Itinerary`, size: 14 });
-      EXPORT_HEADER.forEach((h, i) => items.push({ x: PDF_COL_X[i], y: 556, str: h, size: 9 }));
-      let y = 538;
-      for (const r of page.rows || []) {
+      let y = pageIdx === 0 ? 538 : 580;
+      for (const r of chunk) {
         const vals = [r.date, r.day, r.location, r.time, r.place, r.notes, r.category, r.url];
         vals.forEach((v, i) => {
-          const max = i === 4 ? 48 : (i === 6 ? 28 : (i === 7 ? 36 : (i === 5 ? 24 : 18)));
+          const max = i === 4 ? 42 : (i === 7 ? 32 : (i === 5 ? 20 : 14));
           const str = String(v || "").slice(0, max);
-          if (str) items.push({ x: PDF_COL_X[i], y, str, size: 9 });
+          if (str) items.push({ x: PDF_COL_X[i], y, str, size: 8 });
         });
-        y -= 16;
+        y -= 14;
       }
-      pages.push({ kind: page.kind, title: page.title, items });
-    }
+      pages.push({ kind: "table", title, items, rows: chunk });
+    });
     return pages;
   }
 
@@ -1580,10 +1530,15 @@ window.WorldPlannerImport = (() => {
         byY.get(y).push({ x: it.x, str: it.str });
       }
       const ys = [...byY.keys()].sort((a, b) => b - a);
+      const headerLine = page.items.find((it) => it.y === 556)?.str || "";
       const lines = ys.map((y) => {
         const cells = byY.get(y).sort((a, b) => a.x - b.x);
         return { cells, tab: cells.map((c) => c.str).join("\t"), line: cells.map((c) => c.str).join(" ") };
       });
+      if (i === 0 && headerLine) {
+        const hdrCells = EXPORT_HEADER.map((str, idx) => ({ x: PDF_COL_X[idx], str }));
+        lines.unshift({ cells: hdrCells, tab: EXPORT_HEADER.join("\t"), line: EXPORT_HEADER.join(" ") });
+      }
       return { pageNum: i + 1, lines };
     });
   }

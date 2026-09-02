@@ -98,7 +98,7 @@ Correct:
 - Cities such as Istanbul / Cappadocia map to **Turkey** (`locationCountryHint` + `countryIso`). Missing countries are **created** and persisted as `extraCountries`. Maps URLs and planner categories are stored on the place.
 - Accepts `.xlsx`, `.xls`, `.csv`, `.pdf`, **`.zip`** (CSV/PDF/Excel inside).
 - After parse, `#import-pages-modal` lists **every page** with a checkbox. Itinerary / continuation pages are pre-checked; cover, TOC, and **getting-around** pages are not. Import only the checked pages, then `#import-summary-modal` lists cities and new places.
-- **Export** (`buildExportPack` / `exportCsv` / `exportXlsx` / `exportPdf`) is the inverse: cover + `{City} Itinerary` pages/sheets + Getting Around guides, same 8 columns (`Date, Day, Location, Time/Order, Place/Activity, Notes, Category, Google Maps Link`). Downloads a ZIP of CSV + XLSX + PDF. A ZIP that is only those three formats re-imports the **PDF** pages so the picker matches.
+- **Export** (`buildExportPack` / `exportCsv` / `exportPdf`) — one timeline-ordered table in CSV + PDF inside a ZIP. Skips empty placeholder rows. Same 8 columns as import.
 
 Tests: `node scripts/test-import-planner.js`
 
