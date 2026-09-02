@@ -18,8 +18,8 @@ window.WorldGlobe = (() => {
   const TAP_MAX_MS = 400;
 
   const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+  const EARTH_TEX_CDN = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
   const EARTH_TEX_LOCAL = "assets/textures/earth.jpg";
-  const EARTH_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{l}/{y}/{x}";
   const ROTATE_KEY = "mister-worldwide-globe-rotate";
   const PIN_VIEW_KEY = "mister-worldwide-globe-pin-view";
   const ROTATE_SPEED = 0.4;
@@ -149,20 +149,29 @@ window.WorldGlobe = (() => {
 
   function applyGlobeQuality() {
     if (!globe) return;
-    const renderer = globe.renderer?.();
-    if (renderer) {
+    try {
+      const renderer = globe.renderer?.();
+      if (!renderer) return;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      const maxAniso = renderer.capabilities?.getMaxAnisotropy?.() || 8;
-      const mat = globe.globeMaterial?.();
-      const map = mat?.map;
-      if (map) {
-        map.anisotropy = maxAniso;
-        map.minFilter = 1003; // THREE.LinearMipmapLinearFilter
-        map.magFilter = 1006; // THREE.LinearFilter
-        map.generateMipmaps = true;
-        map.needsUpdate = true;
-      }
+      const map = globe.globeMaterial?.()?.map;
+      if (!map) return;
+      const maxAniso = renderer.capabilities?.getMaxAnisotropy?.() || 1;
+      map.anisotropy = maxAniso;
+      map.needsUpdate = true;
+    } catch (e) {
+      console.warn("Globe quality tweak failed", e);
     }
+  }
+
+  function loadHiResTexture() {
+    const img = new Image();
+    img.onload = () => {
+      if (!globe) return;
+      globe.globeImageUrl(EARTH_TEX_LOCAL);
+      applyGlobeQuality();
+    };
+    img.onerror = () => applyGlobeQuality();
+    img.src = EARTH_TEX_LOCAL;
   }
 
   function scheduleCityPinRefresh(delay = 180) {
@@ -512,9 +521,7 @@ window.WorldGlobe = (() => {
     bindPinViewToggle();
 
     globe = Globe()
-      .globeImageUrl(EARTH_TEX_LOCAL)
-      .globeTileEngineUrl((x, y, l) => EARTH_TILE_URL.replace("{x}", x).replace("{y}", y).replace("{l}", l))
-      .globeCurvatureResolution(2)
+      .globeImageUrl(EARTH_TEX_CDN)
       .showGlobe(true)
       .showAtmosphere(true)
       .atmosphereColor("#7cf0ff")
@@ -524,6 +531,7 @@ window.WorldGlobe = (() => {
       .height(Math.max(el.clientHeight, 320))(el);
 
     applyGlobeQuality();
+    loadHiResTexture();
 
     globe
       .polygonsData([])
@@ -555,7 +563,6 @@ window.WorldGlobe = (() => {
     onResize();
     syncRotateButton();
     syncPinViewButton();
-    setTimeout(applyGlobeQuality, 400);
 
     return globe;
   }
