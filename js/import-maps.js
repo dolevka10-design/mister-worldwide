@@ -412,9 +412,14 @@ window.WorldMapsImport = (() => {
   async function resolveMapsUrl(url) {
     const raw = String(url || "").trim();
     if (!raw) return { url: raw, lat: null, lng: null, name: null, city: null, country: null };
-    try {
-      const res = await fetch(`/.netlify/functions/resolve-maps?url=${encodeURIComponent(raw)}`);
-      if (res.ok) {
+    const endpoints = [
+      `/api/resolve-maps?url=${encodeURIComponent(raw)}`,
+      `/.netlify/functions/resolve-maps?url=${encodeURIComponent(raw)}`,
+    ];
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep);
+        if (!res.ok) continue;
         const data = await res.json();
         return {
           url: data.url || raw,
@@ -424,8 +429,10 @@ window.WorldMapsImport = (() => {
           city: data.city || null,
           country: data.country || null,
         };
+      } catch {
+        /* try next */
       }
-    } catch { /* fall through */ }
+    }
     const local = parseCoordsFromUrl(raw);
     return {
       url: raw,

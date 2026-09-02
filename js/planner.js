@@ -1140,7 +1140,7 @@ window.WorldPlanner = (() => {
       const country = state.countries.find((c) => c.id === seg?.countryId);
       const compact = places.map((p) => `${p.id}|${p.name}|${p.category}`).join("\n");
       const provider = WorldAssistant?.getApiKey?.("groq") ? "groq" : "openrouter";
-      const res = await fetch(`/.netlify/functions/llm?provider=${provider}`, {
+      const res = await fetch(`/api/llm?provider=${provider}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
         body: JSON.stringify({

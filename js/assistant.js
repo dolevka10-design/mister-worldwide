@@ -1526,13 +1526,13 @@
     return !host || host === "localhost" || host === "127.0.0.1";
   }
 
-  /** Ordered endpoints: Netlify Function only (redirect proxies break POST on mobile). */
+  /** Ordered endpoints: Cloudflare/Netlify API proxy (browser cannot call Groq/OR directly). */
   function llmEndpoints(provider) {
     const p = PROVIDERS[provider];
     const urls = [];
     if (location.protocol.startsWith("http")) {
-      urls.push(`/.netlify/functions/llm?provider=${encodeURIComponent(provider)}`);
       urls.push(`/api/llm?provider=${encodeURIComponent(provider)}`);
+      urls.push(`/.netlify/functions/llm?provider=${encodeURIComponent(provider)}`);
     }
     if (isLocalHost() && p?.directBase) {
       urls.push(`${p.directBase}/chat/completions`);
@@ -1594,13 +1594,13 @@
       res.statusText ||
       `${label} request failed`;
     if (/^\s*</.test(rawText || "") || /<!DOCTYPE|Mister Worldwide/i.test(rawText || "")) {
-      return `Proxy not live (got HTML). Redeploy Netlify with netlify/functions, then hard-refresh. Or try: key openrouter sk-or-…`;
+      return `Proxy not live (got HTML). Hard-refresh after deploy — /api/llm must be available.`;
     }
     return `HTTP ${res.status}: ${msg}`;
   }
 
   async function geminiGenerate(contents, modelName) {
-    const key = getApiKey();
+    const key = getApiKey("gemini");
     if (!key) throw new Error("NO_API_KEY");
     const model = modelName || activeModel;
 
@@ -2447,15 +2447,20 @@
           "Gemini tool error — chat history reset. Retry your message.\n" +
             "Tip: use gemini-2.5-flash-lite, or paste Maps URLs directly (imports without AI)."
         );
+      } else if (/Failed to fetch|NetworkError|Load failed/i.test(msg) && providerId === "gemini") {
+        bot(
+          `Gemini network error: ${msg}\n\n` +
+            "Check connection, try gemini-2.5-flash-lite, or use Auto mode to fall back to Groq/OpenRouter."
+        );
       } else if (/Failed to fetch|NetworkError|CORS/i.test(msg) && providerId === "groq") {
         bot(
-          "Groq blocked from this host (CORS). Redeploy Netlify (proxy), or use OpenRouter free:\n" +
-            "key openrouter sk-or-…"
+          "Groq blocked from this host (CORS). Hard-refresh — /api/llm proxy should be live after deploy.\n" +
+            "Or use Gemini: key gemini AIza…"
         );
-      } else if (isProxyOrTransportError(e)) {
+      } else if (isProxyOrTransportError(e) && providerId !== "gemini") {
         bot(
           `AI proxy error (${providerLabel()}): ${msg}\n\n` +
-            "Groq/OpenRouter need Netlify Functions (not static-only hosting).\n" +
+            "Groq/OpenRouter need the /api/llm server route (Cloudflare Worker or Netlify Function).\n" +
             "Hard-refresh after deploy, or use Gemini (direct, no proxy).\n" +
             "Check keys: send `keys`"
         );
