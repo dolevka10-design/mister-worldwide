@@ -389,7 +389,7 @@ window.WorldApp = (() => {
       await Promise.all(
         batch.map(async (g) => {
           const key = cityCenterKey(g.countryId, g.city);
-          const coords = await geocodeCityCenter(g.city, countryNameForId(g.countryId), g.places);
+          const coords = await geocodeCityCenter(g.city, g.countryId, countryNameForId(g.countryId), g.places);
           if (coords) cityCenterCache.set(key, coords);
         })
       );
