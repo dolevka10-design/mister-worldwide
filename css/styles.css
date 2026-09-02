@@ -365,7 +365,7 @@ html, body {
   left: 50%;
   bottom: calc(0.55rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%) translateY(10px);
-  z-index: 12;
+  z-index: 20;
   width: min(18rem, calc(100% - 1.5rem));
   pointer-events: none;
   display: flex;
