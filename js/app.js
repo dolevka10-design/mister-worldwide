@@ -225,21 +225,25 @@ window.WorldApp = (() => {
   }
 
   function cityPinsForCountry(countryId) {
-    const places = WorldStore.placesByCountry(state, countryId);
+    return allCityPins().filter((p) => p.countryId === countryId);
+  }
+
+  function allCityPins() {
+    if (!state?.places?.length) return [];
     const groups = new Map();
-    for (const p of places) {
+    for (const p of state.places) {
       const city = String(p.city || "").trim();
       if (!city || city === "Other") continue;
-      if (!groups.has(city)) groups.set(city, []);
-      groups.get(city).push(p);
+      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+      const key = `${p.countryId}|${city}`;
+      if (!groups.has(key)) groups.set(key, { countryId: p.countryId, city, places: [] });
+      groups.get(key).places.push(p);
     }
     const pins = [];
-    for (const [city, items] of groups) {
-      const located = items.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-      if (!located.length) continue;
-      const lat = located.reduce((s, p) => s + p.lat, 0) / located.length;
-      const lng = located.reduce((s, p) => s + p.lng, 0) / located.length;
-      pins.push({ city, countryId, lat, lng, placeCount: items.length });
+    for (const g of groups.values()) {
+      const lat = g.places.reduce((s, p) => s + p.lat, 0) / g.places.length;
+      const lng = g.places.reduce((s, p) => s + p.lng, 0) / g.places.length;
+      pins.push({ countryId: g.countryId, city: g.city, lat, lng, placeCount: g.places.length });
     }
     return pins;
   }
@@ -725,7 +729,7 @@ window.WorldApp = (() => {
           countries: countriesForUi(state),
           onCountryClick: selectCountry,
           onCityClick: selectCityInCountry,
-          getCityPinsForCountry: cityPinsForCountry,
+          getAllCityPins: allCityPins,
         });
         ready = true;
       } else {

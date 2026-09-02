@@ -7,27 +7,24 @@ window.WorldGlobe = (() => {
   let resizeObserver = null;
   let onCountryClick = null;
   let onCityClick = null;
-  let getCityPinsForCountry = null;
+  let getAllCityPins = null;
   let countries = [];
   let centroidsByName = new Map();
-  let countryFeatures = new Map();
   let autoRotateEnabled = false;
   let pinClickBound = false;
   let globeDragging = false;
   let pointerSession = null;
   const TAP_MOVE_PX = 14;
   const TAP_MAX_MS = 400;
-  const CITY_PIN_ALTITUDE_ENTER = 1.95;
-  const COUNTRY_PIN_ALTITUDE_EXIT = 2.15;
 
   const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
   const EARTH_TEX_CDN = "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg";
   const EARTH_TEX_LOCAL = "assets/textures/earth.jpg";
   const ROTATE_KEY = "mister-worldwide-globe-rotate";
+  const PIN_VIEW_KEY = "mister-worldwide-globe-pin-view";
   const ROTATE_SPEED = 0.4;
 
   let lastSelectAt = 0;
-  let zoomSyncTimer = null;
 
   function loadRotatePref() {
     try {
@@ -40,6 +37,22 @@ window.WorldGlobe = (() => {
   function saveRotatePref(on) {
     try {
       localStorage.setItem(ROTATE_KEY, on ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function loadPinViewPref() {
+    try {
+      return localStorage.getItem(PIN_VIEW_KEY) === "city" ? "city" : "country";
+    } catch {
+      return "country";
+    }
+  }
+
+  function savePinViewPref(mode) {
+    try {
+      localStorage.setItem(PIN_VIEW_KEY, mode);
     } catch {
       /* ignore */
     }
@@ -69,6 +82,15 @@ window.WorldGlobe = (() => {
       : "Steady globe — tap to auto-rotate";
   }
 
+  function syncPinViewButton() {
+    const btn = document.getElementById("btn-globe-pin-view");
+    if (!btn) return;
+    const city = pinViewMode === "city";
+    btn.textContent = city ? "Countries" : "Cities";
+    btn.setAttribute("aria-pressed", city ? "true" : "false");
+    btn.title = city ? "Show country pins on the globe" : "Show city pins on the globe";
+  }
+
   function bindRotateToggle() {
     const btn = document.getElementById("btn-globe-rotate");
     if (!btn || btn._bound) return;
@@ -79,6 +101,18 @@ window.WorldGlobe = (() => {
       setAutoRotate(!autoRotateEnabled);
     });
     syncRotateButton();
+  }
+
+  function bindPinViewToggle() {
+    const btn = document.getElementById("btn-globe-pin-view");
+    if (!btn || btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setPinViewMode(pinViewMode === "city" ? "country" : "city");
+    });
+    syncPinViewButton();
   }
 
   function selectCountry(countryId) {
@@ -151,70 +185,6 @@ window.WorldGlobe = (() => {
       if (name && c) map.set(name, c);
     }
     centroidsByName = map;
-  }
-
-  function buildCountryFeatures(features, list) {
-    const map = new Map();
-    for (const c of list || []) {
-      const atlasName = CountryMeta.atlasLookupName(c.name);
-      const feat = features.find((f) => f?.properties?.name === atlasName);
-      if (feat) map.set(c.id, feat);
-    }
-    countryFeatures = map;
-  }
-
-  function pointInRing(lng, lat, ring) {
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = ring[i][0];
-      const yi = ring[i][1];
-      const xj = ring[j][0];
-      const yj = ring[j][1];
-      const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
-
-  function pointInFeature(lng, lat, feat) {
-    const geom = feat?.geometry;
-    if (!geom) return false;
-    if (geom.type === "Polygon") return pointInRing(lng, lat, geom.coordinates[0]);
-    if (geom.type === "MultiPolygon") {
-      return geom.coordinates.some((poly) => pointInRing(lng, lat, poly[0]));
-    }
-    return false;
-  }
-
-  function nearestCountryId(lat, lng) {
-    let best = null;
-    let bestDist = Infinity;
-    for (const c of countries) {
-      if (!c.placeCount) continue;
-      const center = countryCenter(c);
-      if (!center) continue;
-      const d = Math.hypot(center.lat - lat, center.lng - lng);
-      if (d < bestDist) {
-        bestDist = d;
-        best = c.id;
-      }
-    }
-    return { id: best, dist: bestDist };
-  }
-
-  function countryIdAtView(lat, lng) {
-    for (const c of countries) {
-      if (!c.placeCount) continue;
-      const feat = countryFeatures.get(c.id);
-      if (feat && pointInFeature(lng, lat, feat)) return c.id;
-    }
-    const near = nearestCountryId(lat, lng);
-    const maxDist = 10 + (getAltitude() || 2) * 8;
-    return near.dist <= maxDist ? near.id : null;
-  }
-
-  function getAltitude() {
-    return globe?.pointOfView?.()?.altitude ?? null;
   }
 
   function countryCenter(c) {
@@ -347,8 +317,7 @@ window.WorldGlobe = (() => {
 
   let pinsVisible = true;
   let dayMode = false;
-  let cityMode = false;
-  let cityModeCountryId = null;
+  let pinViewMode = "country";
 
   function makePlacePin(d) {
     const el = document.createElement("button");
@@ -367,8 +336,6 @@ window.WorldGlobe = (() => {
       .map((p, i) => ({ ...p, label: p.label || String(i + 1) }));
     if (!data.length) return;
     dayMode = true;
-    cityMode = false;
-    cityModeCountryId = null;
     pinsVisible = true;
     globe
       .htmlElement((d) => makePlacePin(d))
@@ -382,80 +349,50 @@ window.WorldGlobe = (() => {
 
   function showCountryFlagPins() {
     if (!globe) return;
-    cityMode = false;
-    cityModeCountryId = null;
     const data = pinsVisible ? pinData(countries) : [];
     globe.htmlElement((d) => makeFlagPin(d)).htmlElementsData(data);
   }
 
-  function showCityPins(countryId, pins) {
-    if (!globe || !pins?.length) return;
-    cityMode = true;
-    cityModeCountryId = countryId;
-    pinsVisible = true;
+  function showAllCityPins() {
+    if (!globe) return;
+    const pins = getAllCityPins?.() || [];
+    if (!pins.length) {
+      showCountryFlagPins();
+      return;
+    }
     globe
       .htmlElement((d) => makeCityPin(d))
       .htmlElementsData(pins);
   }
 
+  function applyPinView() {
+    if (!globe || dayMode) return;
+    savePinViewPref(pinViewMode);
+    syncPinViewButton();
+    if (!pinsVisible) {
+      globe.htmlElementsData([]);
+      return;
+    }
+    if (pinViewMode === "city") showAllCityPins();
+    else showCountryFlagPins();
+  }
+
+  function setPinViewMode(mode) {
+    pinViewMode = mode === "city" ? "city" : "country";
+    applyPinView();
+  }
+
   function restoreCountryPins() {
     if (!globe) return;
     dayMode = false;
-    cityMode = false;
-    cityModeCountryId = null;
     pinsVisible = true;
-    syncPinModeFromZoom();
+    applyPinView();
   }
 
   function setPinsVisible(visible) {
     pinsVisible = !!visible;
     if (!globe || dayMode) return;
-    if (cityMode) {
-      if (!pinsVisible) globe.htmlElementsData([]);
-      else syncPinModeFromZoom();
-      return;
-    }
-    const data = pinsVisible ? pinData(countries) : [];
-    globe.htmlElement((d) => makeFlagPin(d)).htmlElementsData(data);
-  }
-
-  function scheduleZoomSync(delay = 150) {
-    clearTimeout(zoomSyncTimer);
-    zoomSyncTimer = setTimeout(syncPinModeFromZoom, delay);
-  }
-
-  function syncPinModeFromZoom() {
-    if (!globe || dayMode) return;
-    const pov = globe.pointOfView?.();
-    const alt = pov?.altitude;
-    if (!Number.isFinite(alt)) return;
-
-    if (alt >= COUNTRY_PIN_ALTITUDE_EXIT) {
-      if (cityMode) showCountryFlagPins();
-      else if (pinsVisible) showCountryFlagPins();
-      else globe.htmlElementsData([]);
-      return;
-    }
-
-    if (alt > CITY_PIN_ALTITUDE_ENTER) return;
-
-    const countryId = countryIdAtView(pov.lat, pov.lng);
-    if (!countryId) {
-      if (cityMode) showCountryFlagPins();
-      return;
-    }
-
-    const cityPins = getCityPinsForCountry?.(countryId) || [];
-    if (!cityPins.length) {
-      if (cityMode) showCountryFlagPins();
-      return;
-    }
-
-    if (cityMode && cityModeCountryId === countryId) {
-      globe.htmlElement((d) => makeCityPin(d)).htmlElementsData(cityPins);
-      return;
-    }
-    showCityPins(countryId, cityPins);
+    applyPinView();
   }
 
   function bindControls(controls) {
@@ -472,11 +409,7 @@ window.WorldGlobe = (() => {
     controls.addEventListener("end", () => {
       setTimeout(() => {
         globeDragging = false;
-        scheduleZoomSync(80);
       }, 60);
-    });
-    controls.addEventListener("change", () => {
-      scheduleZoomSync();
     });
     applyAutoRotate();
   }
@@ -487,15 +420,17 @@ window.WorldGlobe = (() => {
 
     onCountryClick = opts.onCountryClick || onCountryClick || (() => {});
     onCityClick = opts.onCityClick || onCityClick || (() => {});
-    getCityPinsForCountry = opts.getCityPinsForCountry || getCityPinsForCountry || (() => []);
+    getAllCityPins = opts.getAllCityPins || getAllCityPins || (() => []);
     countries = opts.countries || countries;
     autoRotateEnabled = loadRotatePref();
+    pinViewMode = loadPinViewPref();
 
     if (globe && container !== el) destroy();
     if (globe && container === el) {
       updatePins(countries);
       onResize();
       syncRotateButton();
+      syncPinViewButton();
       return globe;
     }
 
@@ -503,6 +438,7 @@ window.WorldGlobe = (() => {
     container.classList.add("globe-ready");
     bindPinClicks(el);
     bindRotateToggle();
+    bindPinViewToggle();
 
     globe = Globe()
       .globeImageUrl(EARTH_TEX_CDN)
@@ -538,7 +474,6 @@ window.WorldGlobe = (() => {
       const topo = await fetch(GEO_URL).then((r) => r.json());
       const feats = topojson.feature(topo, topo.objects.countries).features;
       buildCentroids(feats);
-      buildCountryFeatures(feats, countries);
       globe.polygonsData(feats);
     } catch (e) {
       console.warn("GeoJSON load failed", e);
@@ -548,6 +483,7 @@ window.WorldGlobe = (() => {
     bindResize(el);
     onResize();
     syncRotateButton();
+    syncPinViewButton();
 
     return globe;
   }
@@ -556,15 +492,7 @@ window.WorldGlobe = (() => {
     countries = (list || countries).filter((c) => (c.placeCount || 0) > 0);
     if (!globe) return;
     if (dayMode) return;
-    if (cityMode) {
-      syncPinModeFromZoom();
-      return;
-    }
-    if (!pinsVisible) {
-      globe.htmlElementsData([]);
-      return;
-    }
-    showCountryFlagPins();
+    applyPinView();
   }
 
   function focusCountry(countryId) {
@@ -573,13 +501,11 @@ window.WorldGlobe = (() => {
     const center = countryCenter(c);
     if (!center) return;
     globe.pointOfView({ lat: center.lat, lng: center.lng, altitude: 1.55 }, 1200);
-    scheduleZoomSync(1250);
   }
 
   function focusPlace(lat, lng, { altitude = 1.65, duration = 1200 } = {}) {
     if (!globe || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     globe.pointOfView({ lat, lng, altitude }, duration);
-    scheduleZoomSync(duration + 80);
   }
 
   function focusCity(lat, lng, { altitude = 1.35, duration = 900 } = {}) {
@@ -603,7 +529,6 @@ window.WorldGlobe = (() => {
   }
 
   function destroy() {
-    clearTimeout(zoomSyncTimer);
     window.removeEventListener("resize", onResize);
     if (resizeObserver) resizeObserver.disconnect();
     resizeObserver = null;
@@ -614,8 +539,6 @@ window.WorldGlobe = (() => {
     }
     globe = null;
     container = null;
-    cityMode = false;
-    cityModeCountryId = null;
     dayMode = false;
   }
 
@@ -627,7 +550,8 @@ window.WorldGlobe = (() => {
     focusCity,
     showDayPlaces,
     restoreCountryPins,
-    syncPinModeFromZoom,
+    setPinViewMode,
+    getPinViewMode: () => pinViewMode,
     destroy,
     resize,
     isReady,
