@@ -28,13 +28,15 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const MIN_POV_ALT = 0.38;
+  const MIN_POV_ALT = 0.19;
   const MAX_POV_ALT = 3.2;
   const ALT_DISPLAY_FAR = 2.5;
   const ZOOM_MIN = 1;
   const ZOOM_MAX = 40;
-  const ZOOM_TILE_ON = 30;
-  const ZOOM_TILE_OFF = 28;
+  // Fixed physical altitudes — stamped from former HUD zoom 38 before 2x max zoom
+  const TILE_ON_ALT = 0.489;
+  const TILE_OFF_ALT = 0.58;
+  const TILE_MIN_ALT = MIN_POV_ALT;
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
@@ -196,10 +198,6 @@ window.WorldGlobe = (() => {
     return (level - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN);
   }
 
-  const TILE_ON_ALT = zoomLevelToAltitude(ZOOM_TILE_ON);
-  const TILE_OFF_ALT = zoomLevelToAltitude(ZOOM_TILE_OFF);
-  const TILE_MIN_ALT = MIN_POV_ALT;
-
   function bindZoomHud() {
     zoomBarEl = document.getElementById("globe-zoom-bar");
     zoomLevelEl = document.getElementById("globe-zoom-level");
@@ -243,9 +241,9 @@ window.WorldGlobe = (() => {
     const controls = globe?.controls();
     if (!controls || !pov) return;
     const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
-    const close = alt < 0.75;
-    controls.rotateSpeed = close ? 0.1 : Math.max(0.1, Math.min(0.38, alt * 0.16));
-    controls.zoomSpeed = close ? 0.05 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
+    const close = alt < TILE_OFF_ALT;
+    controls.rotateSpeed = close ? 0.08 : Math.max(0.1, Math.min(0.38, alt * 0.16));
+    controls.zoomSpeed = close ? 0.04 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
   }
 
   function enforcePovLimits(pov = globe?.pointOfView?.()) {
