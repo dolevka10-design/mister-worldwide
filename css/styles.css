@@ -360,6 +360,64 @@ html, body {
   border-color: var(--accent) !important;
   color: var(--accent) !important;
 }
+.globe-zoom-bar {
+  position: absolute;
+  left: 50%;
+  bottom: calc(0.55rem + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 12;
+  width: min(18rem, calc(100% - 1.5rem));
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem 0.5rem;
+  border-radius: 999px;
+  background: var(--toolbar-bg);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+  opacity: 0.72;
+  transition: opacity 0.2s ease;
+}
+.globe-zoom-bar.is-active {
+  opacity: 1;
+}
+.globe-zoom-bar-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.globe-zoom-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #7cf0ff);
+  transition: width 0.08s linear;
+}
+.globe-zoom-bar-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.1;
+}
+.globe-zoom-level strong {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+.globe-zoom-mode {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.globe-zoom-mode.is-hires {
+  color: #7cf0ff;
+}
 .globe-canvas canvas {
   display: block;
   width: 100% !important;

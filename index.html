@@ -85,6 +85,15 @@
             <button type="button" class="btn btn-sm btn-ghost globe-toolbar-btn globe-rotate-btn" id="btn-globe-rotate" aria-pressed="false">Steady</button>
           </div>
           <div id="globe" class="globe-canvas" aria-label="3D world globe"></div>
+          <div class="globe-zoom-bar" id="globe-zoom-bar" aria-live="polite">
+            <div class="globe-zoom-bar-track" aria-hidden="true">
+              <div class="globe-zoom-bar-fill" id="globe-zoom-bar-fill"></div>
+            </div>
+            <div class="globe-zoom-bar-meta">
+              <span class="globe-zoom-level">Zoom <strong id="globe-zoom-level">1</strong></span>
+              <span class="globe-zoom-mode" id="globe-zoom-mode">Standard</span>
+            </div>
+          </div>
         </div>
       </main>
 

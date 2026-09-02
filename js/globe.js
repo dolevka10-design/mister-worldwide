@@ -28,16 +28,24 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const TILE_ON_ALT = 1.15;
-  const TILE_OFF_ALT = 1.28;
-  const TILE_MIN_ALT = 0.68;
+  const MIN_POV_ALT = 0.92;
+  const MAX_POV_ALT = 3.2;
+  const ALT_DISPLAY_FAR = 2.5;
+  const TILE_ON_ALT = 0.96;
+  const TILE_OFF_ALT = 1.08;
+  const TILE_MIN_ALT = MIN_POV_ALT;
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
   let tileSyncRaf = null;
+  let zoomHudHideTimer = null;
   let tilesActive = false;
   let tileMaxLevel = 0;
   let allCityPinsCache = [];
+  let zoomBarEl = null;
+  let zoomLevelEl = null;
+  let zoomModeEl = null;
+  let zoomFillEl = null;
 
   function loadRotatePref() {
     try {
@@ -169,12 +177,72 @@ window.WorldGlobe = (() => {
     return x * x * (3 - 2 * x);
   }
 
+  function altitudeToZoomLevel(alt) {
+    if (!Number.isFinite(alt)) return 1;
+    const clamped = Math.max(MIN_POV_ALT, Math.min(ALT_DISPLAY_FAR, alt));
+    const t = (ALT_DISPLAY_FAR - clamped) / (ALT_DISPLAY_FAR - MIN_POV_ALT);
+    return Math.round(1 + t * 19);
+  }
+
+  function zoomLevelProgress(alt) {
+    if (!Number.isFinite(alt)) return 0;
+    const clamped = Math.max(MIN_POV_ALT, Math.min(ALT_DISPLAY_FAR, alt));
+    return (ALT_DISPLAY_FAR - clamped) / (ALT_DISPLAY_FAR - MIN_POV_ALT);
+  }
+
+  function bindZoomHud() {
+    zoomBarEl = document.getElementById("globe-zoom-bar");
+    zoomLevelEl = document.getElementById("globe-zoom-level");
+    zoomModeEl = document.getElementById("globe-zoom-mode");
+    zoomFillEl = document.getElementById("globe-zoom-bar-fill");
+    updateZoomHud();
+  }
+
+  function setZoomBarActive(active) {
+    if (!zoomBarEl) return;
+    zoomBarEl.classList.toggle("is-active", !!active);
+    clearTimeout(zoomHudHideTimer);
+    if (active) return;
+    zoomHudHideTimer = setTimeout(() => {
+      zoomBarEl?.classList.remove("is-active");
+    }, 1400);
+  }
+
+  function updateZoomHud(pov = globe?.pointOfView?.()) {
+    if (!zoomLevelEl || !zoomModeEl || !zoomFillEl) return;
+    const alt = Number.isFinite(pov?.altitude) ? pov.altitude : DEFAULT_POV.altitude;
+    const level = altitudeToZoomLevel(alt);
+    zoomLevelEl.textContent = String(level);
+    zoomFillEl.style.width = `${Math.round(zoomLevelProgress(alt) * 100)}%`;
+    const hires = tilesActive || alt < TILE_ON_ALT;
+    zoomModeEl.textContent = hires ? "Hi-res satellite" : "Standard globe";
+    zoomModeEl.classList.toggle("is-hires", hires);
+  }
+
+  function syncControlSpeeds(pov) {
+    const controls = globe?.controls();
+    if (!controls || !pov) return;
+    const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
+    controls.rotateSpeed = Math.max(0.12, Math.min(0.42, alt * 0.18));
+    controls.zoomSpeed = Math.max(0.08, Math.min(0.35, (alt + 0.4) * 0.12));
+  }
+
+  function enforcePovLimits(pov = globe?.pointOfView?.()) {
+    if (!globe || !pov) return;
+    const alt = pov.altitude;
+    if (!Number.isFinite(alt)) return;
+    if (alt >= MIN_POV_ALT && alt <= MAX_POV_ALT) return;
+    const nextAlt = Math.max(MIN_POV_ALT, Math.min(MAX_POV_ALT, alt));
+    globe.pointOfView({ lat: pov.lat, lng: pov.lng, altitude: nextAlt }, 0);
+    syncControlSpeeds({ ...pov, altitude: nextAlt });
+  }
+
   function maxTileLevelForAltitude(alt) {
     if (!Number.isFinite(alt)) return 0;
     if (tilesActive ? alt >= TILE_OFF_ALT : alt >= TILE_ON_ALT) return 0;
     const mobile = isMobileViewport();
-    const cap = mobile ? 14 : 15;
-    const minLevel = 9;
+    const cap = mobile ? 12 : 14;
+    const minLevel = 10;
     const t = smoothstep((TILE_ON_ALT - alt) / (TILE_ON_ALT - TILE_MIN_ALT));
     return Math.round(minLevel + t * (cap - minLevel));
   }
@@ -236,9 +304,11 @@ window.WorldGlobe = (() => {
     const targetLevel = maxTileLevelForAltitude(alt);
     if (targetLevel <= 0) {
       if (tilesActive) disableZoomTiles();
+      updateZoomHud(pov);
       return;
     }
     enableZoomTiles(targetLevel, alt);
+    updateZoomHud(pov);
   }
 
   function scheduleZoomTileSync() {
@@ -252,8 +322,10 @@ window.WorldGlobe = (() => {
   function resetDefaultView({ duration = 900 } = {}) {
     if (!globe) return;
     disableZoomTiles();
+    setZoomBarActive(true);
     globe.pointOfView({ ...DEFAULT_POV }, duration);
     scheduleZoomTileSync();
+    updateZoomHud({ ...DEFAULT_POV });
   }
 
   function bindHomeButton() {
@@ -554,7 +626,8 @@ window.WorldGlobe = (() => {
     const lng = data.reduce((s, p) => s + p.lng, 0) / data.length;
     const spread = Math.max(...data.map((p) => Math.hypot(p.lat - lat, p.lng - lng)), 0.5);
     const altitude = Math.min(2.8, Math.max(1.4, 1.8 + spread * 0.35));
-    globe.pointOfView({ lat, lng, altitude }, 1200);
+    const safeAlt = Math.max(MIN_POV_ALT, altitude);
+    globe.pointOfView({ lat, lng, altitude: safeAlt }, 1200);
   }
 
   function showCountryFlagPins() {
@@ -605,32 +678,45 @@ window.WorldGlobe = (() => {
   }
 
   function bindControls(controls) {
+    const globeR = globe?.getGlobeRadius?.() || 100;
     controls.enableZoom = true;
-    controls.enablePan = true;
+    controls.enablePan = false;
     controls.enableRotate = true;
     controls.enableDamping = true;
-    controls.dampingFactor = 0.12;
-    controls.zoomSpeed = 0.85;
-    controls.rotateSpeed = 0.55;
-    controls.minDistance = 95;
-    controls.maxDistance = 420;
+    controls.dampingFactor = 0.14;
+    controls.minDistance = globeR * (1 + MIN_POV_ALT);
+    controls.maxDistance = globeR * (1 + MAX_POV_ALT);
+    const pov = globe.pointOfView?.() || DEFAULT_POV;
+    syncControlSpeeds(pov);
     controls.addEventListener("start", () => {
       globeDragging = true;
+      setZoomBarActive(true);
     });
     controls.addEventListener("end", () => {
       setTimeout(() => {
         globeDragging = false;
         scheduleCityPinRefresh(80);
         syncZoomTiles();
+        enforcePovLimits();
+        updateZoomHud();
+        setZoomBarActive(false);
       }, 60);
     });
     controls.addEventListener("change", () => {
+      const nextPov = globe.pointOfView?.();
+      enforcePovLimits(nextPov);
+      syncControlSpeeds(globe.pointOfView?.() || nextPov);
       scheduleCityPinRefresh(220);
       scheduleZoomTileSync();
+      updateZoomHud();
+      setZoomBarActive(true);
     });
     applyAutoRotate();
-    globe.onZoom?.(() => {
+    globe.onZoom?.((nextPov) => {
+      enforcePovLimits(nextPov);
+      syncControlSpeeds(nextPov);
       scheduleZoomTileSync();
+      updateZoomHud(nextPov);
     });
   }
 
@@ -652,6 +738,8 @@ window.WorldGlobe = (() => {
       syncRotateButton();
       syncPinViewButton();
       bindHomeButton();
+      bindZoomHud();
+      updateZoomHud();
       return globe;
     }
 
@@ -661,6 +749,7 @@ window.WorldGlobe = (() => {
     bindRotateToggle();
     bindPinViewToggle();
     bindHomeButton();
+    bindZoomHud();
 
     globe = Globe()
       .globeImageUrl(EARTH_TEX_CDN)
@@ -706,6 +795,7 @@ window.WorldGlobe = (() => {
     onResize();
     syncRotateButton();
     syncPinViewButton();
+    updateZoomHud();
 
     return globe;
   }
@@ -727,7 +817,9 @@ window.WorldGlobe = (() => {
 
   function focusPlace(lat, lng, { altitude = 1.65, duration = 1200 } = {}) {
     if (!globe || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    globe.pointOfView({ lat, lng, altitude }, duration);
+    const safeAlt = Math.max(MIN_POV_ALT, Math.min(MAX_POV_ALT, altitude));
+    globe.pointOfView({ lat, lng, altitude: safeAlt }, duration);
+    setZoomBarActive(true);
   }
 
   function focusCity(lat, lng, { altitude = 1.35, duration = 900 } = {}) {
@@ -755,6 +847,7 @@ window.WorldGlobe = (() => {
 
   function destroy() {
     clearTimeout(cityPinRefreshTimer);
+    clearTimeout(zoomHudHideTimer);
     if (tileSyncRaf) cancelAnimationFrame(tileSyncRaf);
     tileSyncRaf = null;
     disableZoomTiles();
