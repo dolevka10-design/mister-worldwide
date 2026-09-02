@@ -399,10 +399,18 @@ html, body {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(124, 240, 255, 0.5);
+  background: rgba(255, 255, 255, 0.28);
   transform: translateX(-50%);
   pointer-events: none;
   z-index: 1;
+}
+.globe-zoom-tick.is-entry {
+  width: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(124, 240, 255, 0.65);
+}
+.globe-zoom-tick.is-hires {
+  background: rgba(124, 240, 255, 0.55);
 }
 .globe-zoom-bar-fill {
   position: relative;
@@ -411,7 +419,7 @@ html, body {
   width: 0%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent), #7cf0ff);
-  transition: width 0.08s linear;
+  transition: width 0.16s ease-out;
 }
 .globe-zoom-bar-meta {
   display: flex;

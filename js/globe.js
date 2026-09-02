@@ -35,16 +35,17 @@ window.WorldGlobe = (() => {
   const TILE_ON_ALT = 0.489;
   const TILE_OFF_ALT = 0.58;
   const TILE_MIN_ALT = MIN_POV_ALT;
-  const HI_RES_TIERS = [
-    { minPct: 81, level: 10, curvature: 5, label: "Satellite" },
-    { minPct: 84, level: 10, curvature: 4, label: "Satellite" },
-    { minPct: 87, level: 11, curvature: 4, label: "Satellite+" },
-    { minPct: 90, level: 12, curvature: 3, label: "Hi-res" },
-    { minPct: 93, level: 12, curvature: 3, label: "Hi-res" },
-    { minPct: 95, level: 13, curvature: 3, label: "Hi-res+" },
-    { minPct: 97, level: 14, curvature: 3, label: "Detail" },
-    { minPct: 99, level: 15, curvature: 2, label: "Max detail" },
+  const HOME_FLIGHT_MS = 1600;
+  const STANDARD_STAGES = [
+    { minPct: 0, curvature: 5, label: "Standard globe" },
+    { minPct: 25, curvature: 5, label: "Standard globe" },
+    { minPct: 40, curvature: 4, label: "Regional" },
+    { minPct: 55, curvature: 4, label: "Regional+" },
+    { minPct: 70, curvature: 3, label: "Closer" },
   ];
+  let TILE_ON_PCT = 0;
+  let TILE_OFF_PCT = 0;
+  let HI_RES_TIERS = [];
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
@@ -190,19 +191,77 @@ window.WorldGlobe = (() => {
     return Math.round(((ALT_DISPLAY_FAR - clamped) / (ALT_DISPLAY_FAR - MIN_POV_ALT)) * 100);
   }
 
-  const TILE_ON_PCT = zoomPercent(TILE_ON_ALT);
-  const TILE_OFF_PCT = zoomPercent(TILE_OFF_ALT);
-
-  function qualityTierForPercent(pct) {
-    let tier = null;
-    for (const step of HI_RES_TIERS) {
-      if (pct >= step.minPct) tier = step;
+  function initZoomScale() {
+    TILE_ON_PCT = zoomPercent(TILE_ON_ALT);
+    TILE_OFF_PCT = zoomPercent(TILE_OFF_ALT);
+    const step = 2;
+    const minLevel = 10;
+    const maxLevel = 15;
+    const labels = [
+      "Satellite",
+      "Satellite",
+      "Satellite+",
+      "Hi-res",
+      "Hi-res",
+      "Hi-res+",
+      "Detail",
+      "Detail",
+      "Detail+",
+      "Max detail",
+      "Max detail",
+    ];
+    HI_RES_TIERS = [];
+    let idx = 0;
+    for (let pct = TILE_ON_PCT; pct < 100; pct += step) {
+      const t = (pct - TILE_ON_PCT) / Math.max(1, 100 - TILE_ON_PCT);
+      HI_RES_TIERS.push({
+        minPct: pct,
+        level: Math.round(minLevel + t * (maxLevel - minLevel)),
+        curvature: Math.max(2, Math.round(5 - t * 3)),
+        label: labels[Math.min(idx, labels.length - 1)],
+      });
+      idx += 1;
     }
-    return tier;
+    HI_RES_TIERS.push({ minPct: 100, level: maxLevel, curvature: 2, label: "Max detail" });
+  }
+  initZoomScale();
+
+  function standardStageForPercent(pct) {
+    let stage = STANDARD_STAGES[0];
+    for (const step of STANDARD_STAGES) {
+      if (pct >= step.minPct) stage = step;
+    }
+    return stage;
+  }
+
+  function qualityAtPercent(pct) {
+    if (pct < TILE_ON_PCT || !HI_RES_TIERS.length) return null;
+    if (pct >= HI_RES_TIERS[HI_RES_TIERS.length - 1].minPct) {
+      return HI_RES_TIERS[HI_RES_TIERS.length - 1];
+    }
+    for (let i = 0; i < HI_RES_TIERS.length - 1; i++) {
+      const lo = HI_RES_TIERS[i];
+      const hi = HI_RES_TIERS[i + 1];
+      if (pct >= lo.minPct && pct < hi.minPct) {
+        const t = (pct - lo.minPct) / Math.max(1, hi.minPct - lo.minPct);
+        return {
+          minPct: lo.minPct,
+          level: Math.round(lo.level + (hi.level - lo.level) * t),
+          curvature: Math.round(lo.curvature + (hi.curvature - lo.curvature) * t),
+          label: lo.label,
+        };
+      }
+    }
+    return HI_RES_TIERS[0];
+  }
+
+  function displayStageForPercent(pct) {
+    if (pct >= TILE_ON_PCT) return qualityAtPercent(pct) || standardStageForPercent(pct);
+    return standardStageForPercent(pct);
   }
 
   function qualityTierForAltitude(alt) {
-    return qualityTierForPercent(zoomPercent(alt));
+    return displayStageForPercent(zoomPercent(alt));
   }
 
   function bindZoomHud() {
@@ -210,17 +269,33 @@ window.WorldGlobe = (() => {
     zoomLevelEl = document.getElementById("globe-zoom-level");
     zoomModeEl = document.getElementById("globe-zoom-mode");
     zoomFillEl = document.getElementById("globe-zoom-bar-fill");
+    initZoomScale();
     renderZoomTicks();
     setZoomBarVisible(false);
   }
 
   function renderZoomTicks() {
     const track = document.querySelector(".globe-zoom-bar-track");
-    if (!track || track._ticksBound) return;
+    if (!track) return;
+    track.querySelectorAll(".globe-zoom-tick").forEach((el) => el.remove());
     track._ticksBound = true;
-    for (const tier of HI_RES_TIERS) {
+    for (const stage of STANDARD_STAGES) {
+      if (stage.minPct <= 0) continue;
       const tick = document.createElement("span");
-      tick.className = "globe-zoom-tick";
+      tick.className = "globe-zoom-tick is-standard";
+      tick.style.left = `${stage.minPct}%`;
+      tick.title = `${stage.minPct}% · ${stage.label}`;
+      track.appendChild(tick);
+    }
+    const entry = document.createElement("span");
+    entry.className = "globe-zoom-tick is-entry";
+    entry.style.left = `${TILE_ON_PCT}%`;
+    entry.title = `${TILE_ON_PCT}% · Satellite entry`;
+    track.appendChild(entry);
+    for (const tier of HI_RES_TIERS) {
+      if (tier.minPct <= TILE_ON_PCT) continue;
+      const tick = document.createElement("span");
+      tick.className = "globe-zoom-tick is-hires";
       tick.style.left = `${tier.minPct}%`;
       tick.title = `${tier.minPct}% · ${tier.label}`;
       track.appendChild(tick);
@@ -262,15 +337,22 @@ window.WorldGlobe = (() => {
     const pct = zoomPercent(alt);
     zoomLevelEl.textContent = `${pct}%`;
     zoomFillEl.style.width = `${pct}%`;
-    const tier = qualityTierForPercent(pct);
+    const stage = displayStageForPercent(pct);
     const hires = tilesActive || pct >= TILE_ON_PCT;
-    if (!hires) {
-      zoomModeEl.textContent = "Standard globe";
-      zoomModeEl.classList.remove("is-hires");
-      return;
+    zoomModeEl.textContent = stage?.label || (hires ? "Hi-res satellite" : "Standard globe");
+    zoomModeEl.classList.toggle("is-hires", hires);
+  }
+
+  function applyBaseGlobeCurvature(pct) {
+    if (!globe || tilesActive) return;
+    const stage = standardStageForPercent(pct);
+    try {
+      if (globe.globeCurvatureResolution?.() !== stage.curvature) {
+        globe.globeCurvatureResolution(stage.curvature);
+      }
+    } catch {
+      /* ignore */
     }
-    zoomModeEl.textContent = tier?.label || "Hi-res satellite";
-    zoomModeEl.classList.add("is-hires");
   }
 
   function syncControlSpeeds(pov) {
@@ -278,17 +360,27 @@ window.WorldGlobe = (() => {
     if (!controls || !pov) return;
     const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
     const pct = zoomPercent(alt);
-    const deep = pct >= 82;
+    const overview = pct < 40;
+    const cruising = pct < 65;
+    const deep = pct >= TILE_ON_PCT;
     const extreme = pct >= 92;
     const maxed = pct >= 97;
-    controls.dampingFactor = maxed ? 0.3 : extreme ? 0.24 : deep ? 0.2 : 0.16;
-    controls.rotateSpeed = maxed ? 0.018 : extreme ? 0.03 : deep ? 0.05 : Math.max(0.1, Math.min(0.38, alt * 0.16));
-    controls.zoomSpeed = maxed ? 0.006 : extreme ? 0.01 : deep ? 0.02 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
-    if (deep && autoRotateEnabled) {
-      controls.autoRotate = false;
-    } else if (!deep && autoRotateEnabled) {
-      controls.autoRotate = true;
+    if (overview) {
+      controls.dampingFactor = 0.1;
+      controls.rotateSpeed = 0.3;
+      controls.zoomSpeed = 0.22;
+    } else if (cruising) {
+      controls.dampingFactor = 0.13;
+      controls.rotateSpeed = Math.max(0.14, Math.min(0.34, alt * 0.15));
+      controls.zoomSpeed = Math.max(0.08, Math.min(0.24, (alt + 0.2) * 0.09));
+    } else {
+      controls.dampingFactor = maxed ? 0.3 : extreme ? 0.24 : deep ? 0.2 : 0.16;
+      controls.rotateSpeed = maxed ? 0.018 : extreme ? 0.03 : deep ? 0.05 : Math.max(0.1, Math.min(0.38, alt * 0.16));
+      controls.zoomSpeed = maxed ? 0.006 : extreme ? 0.01 : deep ? 0.02 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
     }
+    if (deep && autoRotateEnabled) controls.autoRotate = false;
+    else if (!deep && autoRotateEnabled) controls.autoRotate = true;
+    applyBaseGlobeCurvature(pct);
   }
 
   function enforcePovLimits(pov = globe?.pointOfView?.()) {
@@ -305,15 +397,16 @@ window.WorldGlobe = (() => {
     if (!Number.isFinite(alt)) return 0;
     const pct = zoomPercent(alt);
     if (tilesActive ? pct < TILE_OFF_PCT : pct < TILE_ON_PCT) return 0;
-    const tier = qualityTierForPercent(pct);
-    if (!tier) return isMobileViewport() ? 10 : 10;
-    return isMobileViewport() ? Math.min(tier.level, 13) : tier.level;
+    const quality = qualityAtPercent(pct);
+    if (!quality?.level) return isMobileViewport() ? 10 : 10;
+    return isMobileViewport() ? Math.min(quality.level, 13) : quality.level;
   }
 
   function tileCurvatureForAltitude(alt) {
-    if (!Number.isFinite(alt) || zoomPercent(alt) < TILE_OFF_PCT) return 5;
-    const tier = qualityTierForAltitude(alt);
-    return tier?.curvature ?? 5;
+    const pct = zoomPercent(alt);
+    if (!Number.isFinite(alt) || pct < TILE_OFF_PCT) return standardStageForPercent(pct).curvature;
+    const quality = qualityAtPercent(pct);
+    return quality?.curvature ?? 5;
   }
 
   function applyTileCurvature(alt) {
@@ -330,7 +423,8 @@ window.WorldGlobe = (() => {
     if (!globe || !tilesActive) return;
     try {
       globe.globeTileEngineUrl(null);
-      globe.globeCurvatureResolution?.(5);
+      const pct = zoomPercent(globe.pointOfView?.().altitude ?? DEFAULT_POV.altitude);
+      globe.globeCurvatureResolution?.(standardStageForPercent(pct).curvature);
     } catch (e) {
       console.warn("Disable globe tiles failed", e);
     }
@@ -361,6 +455,8 @@ window.WorldGlobe = (() => {
     if (!wasActive && tilesActive) {
       updateZoomHud();
       setZoomBarVisible(true);
+    } else if (tilesActive) {
+      updateZoomHud();
     }
   }
 
@@ -386,7 +482,7 @@ window.WorldGlobe = (() => {
     });
   }
 
-  function resetDefaultView({ duration = 900 } = {}) {
+  function resetDefaultView({ duration = HOME_FLIGHT_MS } = {}) {
     if (!globe) return;
     disableZoomTiles();
     setZoomBarVisible(true);
@@ -394,7 +490,8 @@ window.WorldGlobe = (() => {
     scheduleZoomTileSync();
     lastHudAlt = DEFAULT_POV.altitude;
     updateZoomHud({ ...DEFAULT_POV });
-    setTimeout(() => setZoomBarVisible(false), duration + 200);
+    applyBaseGlobeCurvature(zoomPercent(DEFAULT_POV.altitude));
+    setTimeout(() => setZoomBarVisible(false), duration + 260);
   }
 
   function bindHomeButton() {
@@ -769,7 +866,7 @@ window.WorldGlobe = (() => {
     controls.enablePan = false;
     controls.enableRotate = true;
     controls.enableDamping = true;
-    controls.dampingFactor = 0.16;
+    controls.dampingFactor = 0.1;
     controls.minDistance = globeR * (1 + MIN_POV_ALT);
     controls.maxDistance = globeR * (1 + MAX_POV_ALT);
     const pov = globe.pointOfView?.() || DEFAULT_POV;
