@@ -10,6 +10,14 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="css/styles.css" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("mw-theme");
+          if (t === "light") document.documentElement.dataset.theme = "light";
+        } catch (e) { /* */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="auth-gate" class="auth-gate hidden">
@@ -48,6 +56,7 @@
           </div>
           <span class="user-chip muted" id="user-chip"></span>
           <div class="topbar-actions">
+            <button class="btn btn-ghost btn-sm theme-toggle" id="btn-theme-toggle" type="button" aria-pressed="false" title="Switch to light mode">🌙</button>
             <button class="btn btn-ghost btn-sm" id="btn-import-maps" type="button">Import</button>
             <button class="btn btn-ghost btn-sm" id="btn-planner" type="button">Planner</button>
             <button class="btn btn-ghost btn-sm" id="btn-export-json" type="button">Export</button>
@@ -89,31 +98,45 @@
             <span class="panel-toolbar-caret" id="filter-caret">▲</span>
           </button>
           <div class="panel-toolbar" id="panel-filters">
-            <input id="place-search" type="search" placeholder="Search places…" class="search-input" />
-            <div class="filter-row">
-              <select id="city-filter" class="pill-select"></select>
-              <select id="category-filter" class="pill-select"></select>
+            <div id="panel-filters-places">
+              <input id="place-search" type="search" placeholder="Search places…" class="search-input" />
+              <div class="filter-row">
+                <select id="city-filter" class="pill-select"></select>
+                <select id="category-filter" class="pill-select"></select>
+              </div>
+              <div class="filter-row">
+                <select id="sort-by" class="pill-select" aria-label="Sort by">
+                  <option value="name">Sort: Name</option>
+                  <option value="city">Sort: City</option>
+                  <option value="category">Sort: Category</option>
+                </select>
+                <select id="sort-order" class="pill-select" aria-label="Order">
+                  <option value="asc">A → Z</option>
+                  <option value="desc">Z → A</option>
+                </select>
+              </div>
             </div>
-            <div class="filter-row">
-              <select id="sort-by" class="pill-select" aria-label="Sort by">
-                <option value="name">Sort: Name</option>
-                <option value="city">Sort: City</option>
-                <option value="category">Sort: Category</option>
-              </select>
-              <select id="sort-order" class="pill-select" aria-label="Order">
-                <option value="asc">A → Z</option>
-                <option value="desc">Z → A</option>
-              </select>
+            <div id="panel-filters-trip" class="hidden">
+              <div class="filter-row">
+                <select id="trip-day-filter" class="pill-select" aria-label="Filter by day"></select>
+                <select id="trip-city-filter" class="pill-select" aria-label="Filter by city"></select>
+              </div>
+              <div class="filter-row">
+                <select id="trip-activity-cat-filter" class="pill-select" aria-label="Filter by activity category"></select>
+              </div>
             </div>
             <div class="view-toggle">
               <button type="button" class="tab active" id="view-category">Category</button>
               <button type="button" class="tab" id="view-city">City</button>
               <button type="button" class="tab" id="view-list">List</button>
+              <button type="button" class="tab" id="view-trip">Trip</button>
             </div>
-            <button type="button" class="btn btn-secondary" id="btn-export-csv">Export CSV</button>
-            <div class="maps-url-add">
-              <input id="maps-url-input" type="text" class="search-input" placeholder="Name | City | Country | Maps URL" inputmode="url" />
-              <button type="button" class="btn btn-secondary btn-sm" id="btn-add-maps-url">Add URL</button>
+            <div id="panel-place-actions">
+              <button type="button" class="btn btn-secondary" id="btn-export-csv">Export CSV</button>
+              <div class="maps-url-add">
+                <input id="maps-url-input" type="text" class="search-input" placeholder="Name | City | Country | Maps URL" inputmode="url" />
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-add-maps-url">Add URL</button>
+              </div>
             </div>
           </div>
         </div>

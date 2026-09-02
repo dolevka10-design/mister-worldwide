@@ -6,12 +6,15 @@ window.WorldApp = (() => {
   let user = null;
   let ready = false;
   let selectedCountry = null;
-  let viewMode = "category"; // category | city | list
+  let viewMode = "category"; // category | city | list | trip
   let filterCategory = "";
   let filterCity = "";
   let filterQuery = "";
   let sortBy = "name";
   let sortOrder = "asc";
+  let tripDayFilter = "";
+  let tripCityFilter = "";
+  let tripActivityCategoryFilter = "";
   let placeIdFilter = null;
   let dayPanelLabel = "";
   let placeIdOrder = [];
@@ -117,6 +120,88 @@ window.WorldApp = (() => {
     updateCountryStripArrows();
   }
 
+  const THEME_KEY = "mw-theme";
+
+  function applyTheme(theme) {
+    const next = theme === "light" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch { /* */ }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = next === "light" ? "#f5f5f8" : "#050508";
+    const btn = $("btn-theme-toggle");
+    if (btn) {
+      btn.setAttribute("aria-pressed", next === "light" ? "true" : "false");
+      btn.textContent = next === "light" ? "☀️" : "🌙";
+      btn.title = next === "light" ? "Switch to dark mode" : "Switch to light mode";
+    }
+  }
+
+  function initTheme() {
+    let saved = "dark";
+    try { saved = localStorage.getItem(THEME_KEY) || "dark"; } catch { /* */ }
+    applyTheme(saved);
+  }
+
+  function toggleTheme() {
+    const current = document.documentElement.dataset.theme || "dark";
+    applyTheme(current === "light" ? "dark" : "light");
+  }
+
+  function fmtShortDate(iso) {
+    if (!iso) return "";
+    const d = new Date(`${iso}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "2-digit" });
+  }
+
+  function collectTripActivitiesForCountry(countryId) {
+    if (!state?.planner?.trips?.length) return [];
+    const rows = [];
+    for (const trip of state.planner.trips) {
+      WorldPlanner.migrateTrip(trip);
+      for (let i = 0; i < (trip.days || []).length; i++) {
+        const dayNum = i + 1;
+        const day = trip.days[i];
+        const seg = WorldPlanner.segmentForDay(trip, dayNum);
+        if (seg?.countryId !== countryId) continue;
+        const segCity = seg?.city && seg.city !== "Other" ? seg.city : "";
+        for (const item of WorldPlanner.itemsOf(day)) {
+          const name = String(item.name || "").trim();
+          if (!name || name === "—") continue;
+          const city = item.importLocation || segCity || "Other";
+          const categoryLabel = item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category) || "Other";
+          rows.push({
+            tripId: trip.id,
+            tripName: trip.name || "Trip",
+            dayNum,
+            dayDate: day.date || null,
+            dayKey: `${trip.id}|${dayNum}`,
+            city,
+            category: item.category || "place",
+            categoryLabel,
+            name,
+            url: item.url || "",
+            time: item.time || "",
+            itemId: item.id,
+          });
+        }
+      }
+    }
+    return rows;
+  }
+
+  function updatePanelFilterMode() {
+    const tripMode = viewMode === "trip";
+    $("panel-filters-places")?.classList.toggle("hidden", tripMode);
+    $("panel-filters-trip")?.classList.toggle("hidden", !tripMode);
+    $("panel-place-actions")?.classList.toggle("hidden", tripMode);
+  }
+
+  function setActiveViewTab(id) {
+    document.querySelectorAll(".view-toggle .tab").forEach((t) => t.classList.remove("active"));
+    $(id)?.classList.add("active");
+  }
+
   function updateCountryStripArrows() {
     const list = $("country-list");
     const left = $("country-scroll-left");
@@ -145,6 +230,9 @@ window.WorldApp = (() => {
     filterCategory = "";
     filterCity = "";
     filterQuery = "";
+    tripDayFilter = "";
+    tripCityFilter = "";
+    tripActivityCategoryFilter = "";
     sortBy = "name";
     sortOrder = "asc";
     const q = $("place-search");
@@ -173,8 +261,7 @@ window.WorldApp = (() => {
     const q = $("place-search");
     if (q) q.value = "";
     viewMode = "list";
-    document.querySelectorAll(".view-toggle .tab").forEach((t) => t.classList.remove("active"));
-    $("view-list")?.classList.add("active");
+    setActiveViewTab("view-list");
     WorldGlobe.setPinsVisible?.(false);
     renderCountryList();
     renderCountryPanel();
@@ -188,9 +275,69 @@ window.WorldApp = (() => {
     const country = state.countries.find((c) => c.id === selectedCountry);
     if (!country) return;
 
+    updatePanelFilterMode();
+
     $("panel-flag").src = CountryMeta.flagUrl(country.iso, 80);
     $("panel-flag").alt = country.name;
     $("panel-title").textContent = country.name;
+
+    const body = $("panel-body");
+    if (!body) return;
+
+    if (viewMode === "trip") {
+      const allActivities = collectTripActivitiesForCountry(selectedCountry);
+      const tripCities = [...new Set(allActivities.map((a) => a.city).filter((c) => c && c !== "Other"))].sort();
+      const tripCats = [...new Set(allActivities.map((a) => a.categoryLabel).filter(Boolean))].sort();
+      const tripDays = [];
+      const daySeen = new Set();
+      for (const a of allActivities) {
+        if (daySeen.has(a.dayKey)) continue;
+        daySeen.add(a.dayKey);
+        const parts = [a.tripName, `Day ${a.dayNum}`];
+        if (a.dayDate) parts.push(fmtShortDate(a.dayDate));
+        tripDays.push({ key: a.dayKey, label: parts.join(" · ") });
+      }
+
+      const daySel = $("trip-day-filter");
+      if (daySel) {
+        daySel.innerHTML = `<option value="">All days</option>` +
+          tripDays.map((d) => `<option value="${esc(d.key)}" ${tripDayFilter === d.key ? "selected" : ""}>${esc(d.label)}</option>`).join("");
+      }
+      const tripCitySel = $("trip-city-filter");
+      if (tripCitySel) {
+        tripCitySel.innerHTML = `<option value="">All cities</option>` +
+          tripCities.map((c) => `<option value="${esc(c)}" ${tripCityFilter === c ? "selected" : ""}>${esc(c)}</option>`).join("");
+      }
+      const tripCatSel = $("trip-activity-cat-filter");
+      if (tripCatSel) {
+        tripCatSel.innerHTML = `<option value="">All categories</option>` +
+          tripCats.map((c) => `<option value="${esc(c)}" ${tripActivityCategoryFilter === c ? "selected" : ""}>${esc(c)}</option>`).join("");
+      }
+
+      let activities = allActivities.filter((a) => {
+        if (tripDayFilter && a.dayKey !== tripDayFilter) return false;
+        if (tripCityFilter && a.city !== tripCityFilter) return false;
+        if (tripActivityCategoryFilter && a.categoryLabel !== tripActivityCategoryFilter) return false;
+        return true;
+      });
+      activities.sort((a, b) => {
+        const tripCmp = a.tripName.localeCompare(b.tripName);
+        if (tripCmp) return tripCmp;
+        if (a.dayNum !== b.dayNum) return a.dayNum - b.dayNum;
+        return a.name.localeCompare(b.name);
+      });
+
+      $("panel-count").textContent = allActivities.length
+        ? `${activities.length} trip activit${activities.length === 1 ? "y" : "ies"} · ${allActivities.length} total`
+        : "No planner activities in this country";
+
+      const dayBanner = "";
+      const bodyHtml = activities.length
+        ? `<ul class="place-list trip-activity-list">${activities.map(tripActivityCard).join("")}</ul>`
+        : `<p class="muted panel-empty">${allActivities.length ? "No activities match your filters." : "Open the planner and add trip days in this country to see them here."}</p>`;
+      body.innerHTML = dayBanner + bodyHtml;
+      return;
+    }
 
     let places = WorldStore.placesByCountry(state, selectedCountry, {
       category: filterCategory || undefined,
@@ -235,9 +382,6 @@ window.WorldApp = (() => {
     const orderSel = $("sort-order");
     if (orderSel) orderSel.value = sortOrder;
 
-    const body = $("panel-body");
-    if (!body) return;
-
     const dayBanner = placeIdFilter?.size
       ? `<div class="day-place-filter-banner">
           <span>${esc(dayPanelLabel || "Day places")}</span>
@@ -271,6 +415,23 @@ window.WorldApp = (() => {
       WorldGlobe.restoreCountryPins?.();
       renderCountryPanel();
     });
+  }
+
+  function tripActivityCard(a) {
+    const dayLabel = a.dayDate ? `Day ${a.dayNum} · ${fmtShortDate(a.dayDate)}` : `Day ${a.dayNum}`;
+    const meta = [dayLabel, a.city, a.categoryLabel].filter(Boolean).join(" · ");
+    return `
+      <li class="place-card trip-activity-card">
+        <div class="place-main">
+          <strong>${esc(a.name)}</strong>
+          <span class="place-meta">${esc(meta)}</span>
+          <span class="place-meta muted">${esc(a.tripName)}${a.time ? ` · ${esc(a.time)}` : ""}</span>
+        </div>
+        <div class="place-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-open-trip="${esc(a.tripId)}" data-open-day="${a.dayNum}" title="Open in planner">Planner</button>
+          ${a.url ? `<a class="place-link" href="${esc(a.url)}" target="_blank" rel="noopener">Maps</a>` : ""}
+        </div>
+      </li>`;
   }
 
   function placeCard(p) {
@@ -328,25 +489,39 @@ window.WorldApp = (() => {
 
     $("view-category")?.addEventListener("click", () => {
       viewMode = "category";
-      $("view-category").classList.add("active");
-      $("view-city").classList.remove("active");
-      $("view-list")?.classList.remove("active");
+      setActiveViewTab("view-category");
       renderCountryPanel();
     });
     $("view-city")?.addEventListener("click", () => {
       viewMode = "city";
-      $("view-city").classList.add("active");
-      $("view-category").classList.remove("active");
-      $("view-list")?.classList.remove("active");
+      setActiveViewTab("view-city");
       renderCountryPanel();
     });
     $("view-list")?.addEventListener("click", () => {
       viewMode = "list";
-      $("view-list").classList.add("active");
-      $("view-category").classList.remove("active");
-      $("view-city").classList.remove("active");
+      setActiveViewTab("view-list");
       renderCountryPanel();
     });
+    $("view-trip")?.addEventListener("click", () => {
+      viewMode = "trip";
+      setActiveViewTab("view-trip");
+      renderCountryPanel();
+    });
+
+    $("trip-day-filter")?.addEventListener("change", (e) => {
+      tripDayFilter = e.target.value;
+      renderCountryPanel();
+    });
+    $("trip-city-filter")?.addEventListener("change", (e) => {
+      tripCityFilter = e.target.value;
+      renderCountryPanel();
+    });
+    $("trip-activity-cat-filter")?.addEventListener("change", (e) => {
+      tripActivityCategoryFilter = e.target.value;
+      renderCountryPanel();
+    });
+
+    $("btn-theme-toggle")?.addEventListener("click", toggleTheme);
 
     $("category-filter")?.addEventListener("change", (e) => {
       filterCategory = e.target.value;
@@ -369,6 +544,11 @@ window.WorldApp = (() => {
     });
 
     $("panel-body")?.addEventListener("click", (e) => {
+      const tripBtn = e.target.closest?.("[data-open-trip]");
+      if (tripBtn) {
+        WorldPlanner.openTripDay?.(tripBtn.dataset.openTrip, Number(tripBtn.dataset.openDay));
+        return;
+      }
       const btn = e.target.closest?.("[data-add-trip]");
       if (!btn) return;
       const place = state.places.find((p) => p.id === btn.dataset.addTrip);
@@ -618,6 +798,7 @@ window.WorldApp = (() => {
 
   async function start() {
     try {
+      initTheme();
       bindUi();
       bindAuth();
       watchMainView();

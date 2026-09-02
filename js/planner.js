@@ -278,7 +278,34 @@ window.WorldPlanner = (() => {
     requestAnimationFrame(() => {
       const chip = document.querySelector(".day-nav-chip.active");
       chip?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+      updateDayChipArrows();
     });
+  }
+
+  function dayChipScrollStep(el) {
+    if (!el) return 140;
+    return Math.max(120, Math.round(el.clientWidth * 0.65));
+  }
+
+  function updateDayChipArrows(stripIn) {
+    const strip = stripIn || document.querySelector(".day-chips-strip");
+    if (!strip) return;
+    const chips = strip.querySelector(".day-nav-chips");
+    const left = strip.querySelector('[data-act="day-scroll"][data-dir="left"]');
+    const right = strip.querySelector('[data-act="day-scroll"][data-dir="right"]');
+    if (!chips || !left || !right) return;
+    const max = chips.scrollWidth - chips.clientWidth;
+    left.disabled = chips.scrollLeft <= 2;
+    right.disabled = max <= 2 || chips.scrollLeft >= max - 2;
+  }
+
+  function wireDayChipScroll() {
+    const strip = document.querySelector(".day-chips-strip");
+    const chips = strip?.querySelector(".day-nav-chips");
+    if (!chips || chips._dayScrollWired) return;
+    chips._dayScrollWired = true;
+    chips.addEventListener("scroll", () => updateDayChipArrows(strip), { passive: true });
+    updateDayChipArrows(strip);
   }
 
   function categoryIcon(cat) {
@@ -1646,13 +1673,17 @@ window.WorldPlanner = (() => {
           <p class="day-page-kicker">Day ${dayNum} of ${total}${day.importDay && day.importDay !== dayNum ? ` <span class="muted">(itinerary day ${esc(String(day.importDay))})</span>` : ""}</p>
           <h2 class="day-page-title">${esc(headline)}</h2>
         </header>
-        <div class="day-nav-chips" role="tablist" aria-label="Day chips">
-          ${(trip.days || []).map((d, i) => {
-            const n = i + 1;
-            return `<button type="button" role="tab" class="day-nav-chip ${n === dayNum ? "active" : ""}" data-act="day-go" data-day="${n}" aria-selected="${n === dayNum}">
-              ${d.date ? esc(fmtDate(d.date)) : `D${n}`}
-            </button>`;
-          }).join("")}
+        <div class="day-chips-strip">
+          <button type="button" class="day-scroll-btn" data-act="day-scroll" data-dir="left" aria-label="Scroll days left">‹</button>
+          <div class="day-nav-chips" role="tablist" aria-label="Day chips">
+            ${(trip.days || []).map((d, i) => {
+              const n = i + 1;
+              return `<button type="button" role="tab" class="day-nav-chip ${n === dayNum ? "active" : ""}" data-act="day-go" data-day="${n}" aria-selected="${n === dayNum}">
+                ${d.date ? esc(fmtDate(d.date)) : `D${n}`}
+              </button>`;
+            }).join("")}
+          </div>
+          <button type="button" class="day-scroll-btn" data-act="day-scroll" data-dir="right" aria-label="Scroll days right">›</button>
         </div>
         <div class="day-layout-bar">
           <span class="muted day-layout-label">View</span>
@@ -1780,7 +1811,10 @@ window.WorldPlanner = (() => {
       if (b && lastScroll) b.scrollTop = lastScroll;
     });
     wirePlannerActions();
-    if (showTrip) scrollActiveDayChip();
+    if (showTrip) {
+      scrollActiveDayChip();
+      wireDayChipScroll();
+    }
     return state;
   }
 
@@ -1907,6 +1941,15 @@ window.WorldPlanner = (() => {
       e.preventDefault();
       e.stopPropagation();
       return goToDay(Number(actEl.dataset.day));
+    }
+    if (act === "day-scroll") {
+      e.preventDefault();
+      const strip = actEl.closest(".day-chips-strip");
+      const chips = strip?.querySelector(".day-nav-chips");
+      const dir = actEl.dataset.dir === "left" ? -1 : 1;
+      chips?.scrollBy({ left: dir * dayChipScrollStep(chips), behavior: "smooth" });
+      setTimeout(() => updateDayChipArrows(strip), 280);
+      return;
     }
     if (act === "day-prev") {
       e.preventDefault();
@@ -2543,6 +2586,11 @@ window.WorldPlanner = (() => {
     });
   }
 
+  function openTripDay(tripId, dayNum = 1) {
+    const state = WorldApp.getState();
+    return enterTripView(state, tripId, { dayNum: dayNum || 1 });
+  }
+
   return {
     init, toggle, open: () => toggle(true), render, isOpen: () => open, act, SLOTS, slotLabel,
     ensurePlanner, migrateTrip, createTrip, getActiveTrip, addPlace, removeEntry,
@@ -2550,6 +2598,6 @@ window.WorldPlanner = (() => {
     segmentForDay, placesForDay, localSuggestDay, aiSuggestDay,
     adoptSuggestion, showAddToTripMenu: showAddToTripModal, showAddToTripModal, rebuildDays,
     exportTripSpreadsheet, downloadTripExcel, importDraft, itemsOf,
-    addActivityToDay, buildTripFromSpec, categoryFromInput,
+    addActivityToDay, buildTripFromSpec, categoryFromInput, openTripDay,
   };
 })();
