@@ -364,7 +364,7 @@ html, body {
   position: absolute;
   left: 50%;
   bottom: calc(0.55rem + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateY(10px);
   z-index: 12;
   width: min(18rem, calc(100% - 1.5rem));
   pointer-events: none;
@@ -377,11 +377,14 @@ html, body {
   border: 1px solid var(--border);
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
-  opacity: 0.72;
-  transition: opacity 0.2s ease;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.18s ease, visibility 0.18s ease, transform 0.18s ease;
 }
-.globe-zoom-bar.is-active {
+.globe-zoom-bar.is-visible {
   opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
 }
 .globe-zoom-bar-track {
   width: 100%;
