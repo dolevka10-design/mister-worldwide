@@ -1134,17 +1134,17 @@ window.WorldPlanner = (() => {
     const places = placesForDay(state, trip, dayNum).slice(0, 35);
     const seg = segmentForDay(trip, dayNum);
     if (!places.length) return { ok: false, error: "No places for this day's city" };
-    const key = WorldAssistant?.getApiKey?.();
+    const key = WorldAssistant?.getApiKey?.("groq") || WorldAssistant?.getApiKey?.("openrouter");
     if (!key) return { ok: true, source: "local", suggestions: localSuggestDay(state, trip, dayNum, opts) };
     try {
       const country = state.countries.find((c) => c.id === seg?.countryId);
       const compact = places.map((p) => `${p.id}|${p.name}|${p.category}`).join("\n");
-      const provider = WorldAssistant?.provider?.() || "groq";
+      const provider = WorldAssistant?.getApiKey?.("groq") ? "groq" : "openrouter";
       const res = await fetch(`/.netlify/functions/llm?provider=${provider}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
         body: JSON.stringify({
-          model: provider === "groq" ? "llama-3.1-8b-instant" : "openai/gpt-4o-mini",
+          model: provider === "groq" ? "llama-3.1-8b-instant" : "openrouter/free",
           max_tokens: 280, temperature: 0.4,
           messages: [
             { role: "system", content: "Travel planner. Lines only: placeId|slot|reason. Saved places only." },

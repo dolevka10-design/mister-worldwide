@@ -504,6 +504,17 @@
       return;
     }
     const cleaned = raw.replace(/^["']|["']$/g, "");
+    const multi = extractKeysFromText(cleaned);
+    if (multi.length > 1) {
+      const savedLabels = saveKeysBatch(multi);
+      toggleKeyForm(false);
+      bot(
+        `Saved ${multi.length} keys (${savedLabels.join(", ")})` +
+          `${WorldCloud?.configured && currentUser?.uid !== "local" ? " to cloud" : ""}.\n` +
+          "Pick Auto or a model above."
+      );
+      return;
+    }
     const withPrefix = parseKeyCommand(`key ${cleaned}`);
     const savedAs = setApiKey(withPrefix?.key || cleaned, prov || withPrefix?.provider || detectProviderFromKey(cleaned));
     toggleKeyForm(false);
@@ -538,10 +549,42 @@
     const k = String(key || "").trim().replace(/^["']|["']$/g, "");
     if (!k) return null;
     if (k.startsWith("gsk_")) return "groq";
-    if (k.startsWith("sk-or-") || k.startsWith("sk-or-v1-")) return "openrouter";
+    if (k.startsWith("sk-or-v1-") || k.startsWith("sk-or-")) return "openrouter";
     // Google AI Studio / Gemini keys
     if (k.startsWith("AIza") || /^AIza[0-9A-Za-z_-]{20,}$/.test(k)) return "gemini";
     return null;
+  }
+
+  const KEY_TOKEN_RES = [
+    { provider: "groq", re: /\bgsk_[A-Za-z0-9_-]{20,}\b/g },
+    { provider: "openrouter", re: /\bsk-or-v1-[A-Za-z0-9_-]+\b/g },
+    { provider: "openrouter", re: /\bsk-or-[A-Za-z0-9_-]+\b/g },
+    { provider: "gemini", re: /\bAIza[0-9A-Za-z_-]{20,}\b/g },
+  ];
+
+  function extractKeysFromText(text) {
+    const found = [];
+    const seen = new Set();
+    for (const { provider, re } of KEY_TOKEN_RES) {
+      re.lastIndex = 0;
+      for (const m of String(text || "").matchAll(re)) {
+        const key = m[0];
+        if (seen.has(key)) continue;
+        seen.add(key);
+        found.push({ provider, key });
+      }
+    }
+    return found;
+  }
+
+  function configuredKeyProviders() {
+    return ["gemini", "groq", "openrouter"].filter((p) => !!String(providerKeys[p] || "").trim());
+  }
+
+  function keysSummary() {
+    const parts = configuredKeyProviders().map((p) => PROVIDERS[p].label);
+    if (!parts.length) return "no keys";
+    return `${parts.length} key${parts.length === 1 ? "" : "s"} (${parts.join(", ")})`;
   }
 
   function resolveKeyProvider(key, hint) {
@@ -636,6 +679,7 @@
       modelCooldowns: cool,
       chatHistory,
       uiLog: uiLog.slice(-MAX_UI_LOG),
+      updatedAt: Date.now(),
     };
   }
 
@@ -670,7 +714,8 @@
     const p = normalizeProvider(forProvider || providerId);
     const fromMap = String(providerKeys[p] || "").trim();
     if (fromMap) return fromMap;
-    return String(window.GEMINI_API_KEY || window.LLM_API_KEY || "").trim();
+    if (p === "gemini") return String(window.GEMINI_API_KEY || window.LLM_API_KEY || "").trim();
+    return "";
   }
 
   function resetHistoryForProviderSwitch(prevProvider, nextProvider) {
@@ -733,8 +778,8 @@
 
     const autoOpt = document.createElement("option");
     autoOpt.value = "auto::auto";
-    const nKeys = ["gemini", "groq", "openrouter"].filter((p) => !!String(providerKeys[p] || "").trim()).length;
-    autoOpt.textContent = `Auto · best available (${nKeys} key${nKeys === 1 ? "" : "s"})`;
+    const nKeys = configuredKeyProviders().length;
+    autoOpt.textContent = `Auto · ${nKeys ? keysSummary() : "add keys"}`;
     sel.appendChild(autoOpt);
 
     for (const [pid, p] of Object.entries(PROVIDERS)) {
@@ -774,7 +819,7 @@
       if (autoMode) {
         const pick = lastAutoPick
           ? `${PROVIDERS[lastAutoPick.provider]?.label || lastAutoPick.provider} · ${shortModelLabel(lastAutoPick.model)}`
-          : "best available";
+          : keysSummary();
         sub.textContent = `Auto → ${pick}`;
       } else {
         const keyOk = getApiKey() ? "key ✓" : "need key";
@@ -801,6 +846,14 @@
     else if (/tokens per minute|TPM|RPM|rate limit|429|too many requests/i.test(msg)) ms = Math.max(ms, 65 * 1000);
     else ms = Math.max(ms, 90 * 1000);
     modelCooldowns[cooldownKey(provider, model)] = Date.now() + ms;
+  }
+
+  function isProxyOrTransportError(err) {
+    const msg = String(err?.message || err || "");
+    return (
+      err?.status === 405 ||
+      /HTTP 405|POST only|Proxy not live|Failed to fetch|NetworkError|CORS|Load failed|502|503|504/i.test(msg)
+    );
   }
 
   function isMaxUsageUnavailable(err) {
@@ -1479,11 +1532,12 @@
     const urls = [];
     if (location.protocol.startsWith("http")) {
       urls.push(`/.netlify/functions/llm?provider=${encodeURIComponent(provider)}`);
+      urls.push(`/api/llm?provider=${encodeURIComponent(provider)}`);
     }
     if (isLocalHost() && p?.directBase) {
       urls.push(`${p.directBase}/chat/completions`);
     }
-    return urls;
+    return [...new Set(urls)];
   }
 
   function cloneGeminiPart(p) {
@@ -1639,9 +1693,10 @@
   }
 
   async function openAIChatAt(url, messages, model) {
-    const key = getApiKey();
+    const pid = normalizeProvider(providerId);
+    const key = getApiKey(pid);
     if (!key) throw new Error("NO_API_KEY");
-    const p = PROVIDERS[providerId];
+    const p = PROVIDERS[pid];
     const trimmed = trimMessagesForLlm(messages);
 
     const headers = {
@@ -1649,7 +1704,7 @@
       Authorization: `Bearer ${key}`,
     };
     if (providerId === "openrouter") {
-      headers["HTTP-Referer"] = location.origin || "https://moneyplanneretc.netlify.app";
+      headers["HTTP-Referer"] = location.origin || "https://mister-worldwide.netlify.app";
       headers["X-Title"] = "Mister Worldwide";
     }
 
@@ -1721,8 +1776,8 @@
         if (/Failed to fetch|NetworkError|CORS|Load failed/i.test(msg)) {
           continue;
         }
-        // HTML / missing function — try next
-        if (/Proxy not live|404|502|503/i.test(msg)) {
+        // HTML / missing function / bad proxy — try next endpoint
+        if (/Proxy not live|404|405|502|503|POST only/i.test(msg)) {
           continue;
         }
         throw e;
@@ -2205,6 +2260,9 @@
           markModelCooldown(c.provider, c.model, e);
           continue;
         }
+        if (isProxyOrTransportError(e)) {
+          continue;
+        }
         // Unexpected error — still try next in Auto
         markModelCooldown(c.provider, c.model, e);
         continue;
@@ -2231,26 +2289,62 @@
   function showKeySetup() {
     bot(
       `This AI profile is for ${currentUser?.email || "you"} only.\n\n` +
-        "Free options (pick one):\n" +
-        "• Groq — https://console.groq.com/keys\n" +
-        "  then: key groq gsk_...\n" +
-        "• OpenRouter free — https://openrouter.ai/keys\n" +
-        "  then: key openrouter sk-or-...\n" +
-        "• Gemini free project — https://aistudio.google.com/apikey\n" +
-        "  then: key gemini YOUR_KEY\n\n" +
-        "Or click Key. Keys sync per allowlisted user across browsers."
+        "Free options — add one or all three:\n" +
+        "• Groq — https://console.groq.com/keys → key groq gsk_...\n" +
+        "• OpenRouter — https://openrouter.ai/keys → key openrouter sk-or-...\n" +
+        "• Gemini — https://aistudio.google.com/apikey → key gemini AIza...\n\n" +
+        "Paste all three in one message:\n" +
+        "key gemini AIza… groq gsk_… openrouter sk-or-…\n\n" +
+        "Then pick Auto (rotates models) or a specific model. Keys sync to cloud per user."
     );
   }
 
   function parseKeyCommand(text) {
-    const m = text.match(/^(?:key|apikey|api\s*key)\s+(.+)$/i);
+    const cmds = parseAllKeyCommands(text);
+    return cmds?.length === 1 ? cmds[0] : cmds?.[0] || null;
+  }
+
+  function parseAllKeyCommands(text) {
+    const m = String(text || "").match(/^(?:key|apikey|api\s*key)\s+([\s\S]+)$/i);
     if (!m) return null;
     const rest = m[1].trim();
-    const withProv = rest.match(/^(gemini|groq|openrouter|or|open-router)\s+(.+)$/i);
-    if (withProv) {
-      return { provider: normalizeProvider(withProv[1]), key: withProv[2].trim() };
+    const results = [];
+    const seen = new Set();
+    const add = (provider, key) => {
+      const cleaned = String(key || "").trim().replace(/^["']|["']$/g, "");
+      if (!cleaned || seen.has(cleaned)) return;
+      const p = resolveKeyProvider(cleaned, provider);
+      seen.add(cleaned);
+      results.push({ provider: p, key: cleaned });
+    };
+
+    const explicitRe =
+      /(?:^|[\s,;]+)(gemini|groq|openrouter|or|open-router)\s+((?:gsk_[A-Za-z0-9_-]+|sk-or(?:-v1)?-[A-Za-z0-9_-]+|AIza[0-9A-Za-z_-]+))/gi;
+    let match;
+    while ((match = explicitRe.exec(rest)) !== null) {
+      add(normalizeProvider(match[1]), match[2]);
     }
-    return { provider: resolveKeyProvider(rest, null), key: rest };
+    for (const found of extractKeysFromText(rest)) {
+      add(found.provider, found.key);
+    }
+    if (!results.length) {
+      const withProv = rest.match(/^(gemini|groq|openrouter|or|open-router)\s+(.+)$/i);
+      if (withProv) {
+        add(normalizeProvider(withProv[1]), withProv[2]);
+      } else {
+        add(resolveKeyProvider(rest, null), rest);
+      }
+    }
+    return results.length ? results : null;
+  }
+
+  function saveKeysBatch(entries) {
+    const savedLabels = [];
+    for (const entry of entries) {
+      const p = setApiKey(entry.key, entry.provider);
+      if (!savedLabels.includes(PROVIDERS[p].label)) savedLabels.push(PROVIDERS[p].label);
+    }
+    return savedLabels;
   }
 
   async function handleMessage(raw) {
@@ -2259,19 +2353,19 @@
     if (!ensureAssistantUser()) return;
     me(text);
 
-    const keyCmd = parseKeyCommand(text);
-    if (keyCmd) {
-      const savedAs = setApiKey(keyCmd.key, keyCmd.provider);
+    const keyCmds = parseAllKeyCommands(text);
+    if (keyCmds?.length) {
+      const savedLabels = saveKeysBatch(keyCmds);
       bot(
-        `${PROVIDERS[savedAs].label} key saved for ${currentUser.email} (app + cloud).\n` +
-          "It will still be there after redeploy — just sign in. Pick a model in the dropdown."
+        `Saved ${keyCmds.length} key${keyCmds.length === 1 ? "" : "s"} (${savedLabels.join(", ")}) for ${currentUser.email}` +
+          `${WorldCloud?.configured && currentUser?.uid !== "local" ? " — synced to cloud" : ""}.\n` +
+          `${keysSummary()}. Pick Auto or a model in the dropdown.`
       );
       return;
     }
 
     const mapsUrls = extractMapsUrlsFromText(text);
     if (mapsUrls.length) {
-      me(text);
       try {
         const r = await directImportMapsUrls(text);
         const names = (r.added || []).slice(0, 3).map((p) => p.name).join(", ");
@@ -2296,6 +2390,12 @@
       );
       return;
     }
+    if (/^(clear\s+all\s+keys|remove\s+all\s+keys)$/i.test(text)) {
+      for (const p of Object.keys(providerKeys)) clearApiKey(p);
+      scheduleCloudSave();
+      bot("All provider keys cleared.");
+      return;
+    }
     if (/^(clear\s+key|remove\s+key)$/i.test(text)) {
       clearApiKey(providerId);
       scheduleCloudSave();
@@ -2308,7 +2408,18 @@
       return;
     }
 
-    if (!getApiKey() && !(autoMode && (providerKeys.gemini || providerKeys.groq || providerKeys.openrouter))) {
+    if (/^(keys?|key\s+status)$/i.test(text)) {
+      bot(
+        `Keys: ${keysSummary()}.\n` +
+          `Mode: ${autoMode ? `Auto (${getAutoCandidates().length} ready)` : `${providerLabel()} · ${shortModelLabel(activeModel)}`}.\n` +
+          (lastAutoPick
+            ? `Last auto pick: ${PROVIDERS[lastAutoPick.provider]?.label} · ${shortModelLabel(lastAutoPick.model)}`
+            : "Send all three at once:\nkey gemini AIza… groq gsk_… openrouter sk-or-…")
+      );
+      return;
+    }
+
+    if (!configuredKeyProviders().length && !getApiKey()) {
       showKeySetup();
       return;
     }
@@ -2341,6 +2452,13 @@
           "Groq blocked from this host (CORS). Redeploy Netlify (proxy), or use OpenRouter free:\n" +
             "key openrouter sk-or-…"
         );
+      } else if (isProxyOrTransportError(e)) {
+        bot(
+          `AI proxy error (${providerLabel()}): ${msg}\n\n` +
+            "Groq/OpenRouter need Netlify Functions (not static-only hosting).\n" +
+            "Hard-refresh after deploy, or use Gemini (direct, no proxy).\n" +
+            "Check keys: send `keys`"
+        );
       } else if (/API_KEY_INVALID|invalid.*api.?key|incorrect api key|401|Unauthorized/i.test(msg)) {
         bot(`That ${providerLabel()} key looks invalid. Send: key ${providerId} YOUR_NEW_KEY`);
       } else if (/prepay|credits|billing|quota|rate limit/i.test(msg) && providerId === "gemini") {
@@ -2368,11 +2486,11 @@
 
   function welcomeIfNeeded() {
     if (uiLog.length) return;
-    if (getApiKey() || (autoMode && (providerKeys.gemini || providerKeys.groq || providerKeys.openrouter))) {
+    if (getApiKey() || configuredKeyProviders().length) {
       bot(
         `Hi ${currentUser?.displayName || currentUser?.email || "there"} — your private AI chat is ready` +
-          (autoMode ? " (Auto mode)." : ` (${providerLabel()}).`) +
-          "\nI can search places, add countries, import CSV, and update your globe.\nTry: “show museums in Japan”"
+          (autoMode ? ` (Auto · ${keysSummary()}).` : ` (${providerLabel()}).`) +
+          "\nI can search places, add countries, import CSV, and update your globe.\nTry: “show museums in Japan” · send `keys` for status"
       );
     } else {
       bot(
@@ -2441,21 +2559,21 @@
           const cloudKeys = migrateKeys(cloud);
           const merged = emptyKeys();
           for (const pid of Object.keys(merged)) {
-            if (cloudKeys[pid]) {
-              merged[pid] = cloudKeys[pid];
-            } else if (localKeys[pid]) {
-              merged[pid] = localKeys[pid];
-              pushLocalKeysToCloud = true;
-            }
+            const cloudKey = String(cloudKeys[pid] || "").trim();
+            const localKey = String(localKeys[pid] || "").trim();
+            merged[pid] = cloudKey || localKey;
+            if (localKey && localKey !== cloudKey) pushLocalKeysToCloud = true;
           }
           providerKeys = merged;
-          if (cloud.provider) providerId = normalizeProvider(cloud.provider);
+          if (cloud.autoMode != null) autoMode = !!cloud.autoMode;
+          else autoMode = local.autoMode !== false;
+          if (cloud.provider && !autoMode) providerId = normalizeProvider(cloud.provider);
+          else if (!autoMode) providerId = normalizeProvider(local.provider || "gemini");
           if (cloud.model && (PROVIDERS[providerId].models || []).includes(cloud.model)) {
             activeModel = cloud.model;
           } else if (!(PROVIDERS[providerId].models || []).includes(activeModel)) {
             activeModel = PROVIDERS[providerId].models[0];
           }
-          if (cloud.autoMode != null) autoMode = !!cloud.autoMode;
           if (cloud.lastAutoPick) lastAutoPick = cloud.lastAutoPick;
           if (cloud.modelCooldowns && typeof cloud.modelCooldowns === "object") {
             modelCooldowns = { ...modelCooldowns, ...cloud.modelCooldowns };
@@ -2605,7 +2723,7 @@
     handleMessage,
     open: () => openPanel(true),
     undo: doUndo,
-    hasKey: () => !!getApiKey(),
+    hasKey: () => configuredKeyProviders().length > 0 || !!getApiKey(),
     getApiKey,
     provider: () => providerId,
     model: () => activeModel,
