@@ -28,7 +28,7 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const MIN_POV_ALT = 0.019;
+  const MIN_POV_ALT = 0.008;
   const MAX_POV_ALT = 3.2;
   const ALT_DISPLAY_FAR = 2.5;
   // Fixed physical altitudes — stamped hi-res entry / exit (independent of HUD % scale)
@@ -49,6 +49,11 @@ window.WorldGlobe = (() => {
     { minPct: 60, curvature: 3, label: "Closer" },
     { minPct: 65, curvature: 3, label: "Closer" },
     { minPct: 70, curvature: 3, label: "Closer" },
+    { minPct: 72, curvature: 3, label: "Near satellite" },
+    { minPct: 74, curvature: 3, label: "Near satellite" },
+    { minPct: 76, curvature: 3, label: "Near satellite+" },
+    { minPct: 78, curvature: 2, label: "Near satellite+" },
+    { minPct: 80, curvature: 2, label: "Satellite approach" },
   ];
   let TILE_ON_PCT = 0;
   let TILE_OFF_PCT = 0;
@@ -203,28 +208,38 @@ window.WorldGlobe = (() => {
   }
 
   function hiResLabelForT(t) {
-    if (t < 0.12) return "Satellite";
-    if (t < 0.28) return "Satellite+";
-    if (t < 0.48) return "Hi-res";
-    if (t < 0.68) return "Hi-res+";
-    if (t < 0.84) return "Detail";
-    if (t < 0.94) return "Detail+";
+    if (t < 0.08) return "Satellite";
+    if (t < 0.16) return "Satellite+";
+    if (t < 0.26) return "Satellite++";
+    if (t < 0.36) return "Hi-res";
+    if (t < 0.46) return "Hi-res+";
+    if (t < 0.56) return "Hi-res++";
+    if (t < 0.66) return "Detail";
+    if (t < 0.76) return "Detail+";
+    if (t < 0.86) return "Detail++";
+    if (t < 0.94) return "Ultra detail";
     return "Max detail";
+  }
+
+  function hiResEase(t) {
+    const clamped = Math.max(0, Math.min(1, t));
+    return clamped * clamped * (3 - 2 * clamped);
   }
 
   function initZoomScale() {
     TILE_ON_PCT = zoomPercent(TILE_ON_ALT);
     TILE_OFF_PCT = zoomPercent(TILE_OFF_ALT);
-    const step = 1;
-    const minLevel = 10;
-    const maxLevel = 15;
+    const step = 0.5;
+    const minLevel = 11;
+    const maxLevel = 17;
     HI_RES_TIERS = [];
     for (let pct = TILE_ON_PCT; pct < 100; pct += step) {
       const t = (pct - TILE_ON_PCT) / Math.max(1, 100 - TILE_ON_PCT);
+      const eased = hiResEase(t);
       HI_RES_TIERS.push({
-        minPct: pct,
-        level: Math.round(minLevel + t * (maxLevel - minLevel)),
-        curvature: Math.max(2, Math.round(5 - t * 3)),
+        minPct: Math.round(pct * 10) / 10,
+        level: Math.round(minLevel + eased * (maxLevel - minLevel)),
+        curvature: Math.max(2, Math.round(5 - eased * 3)),
         label: hiResLabelForT(t),
       });
     }
@@ -301,7 +316,7 @@ window.WorldGlobe = (() => {
     track.appendChild(entry);
     for (const tier of HI_RES_TIERS) {
       if (tier.minPct <= TILE_ON_PCT) continue;
-      if ((tier.minPct - TILE_ON_PCT) % 5 !== 0 && tier.minPct !== 100) continue;
+      if ((tier.minPct - TILE_ON_PCT) % 4 !== 0 && tier.minPct !== 100) continue;
       const tick = document.createElement("span");
       tick.className = "globe-zoom-tick is-hires";
       tick.style.left = `${tier.minPct}%`;
@@ -370,19 +385,26 @@ window.WorldGlobe = (() => {
     const pct = zoomPercent(alt);
     const overview = pct < 40;
     const cruising = pct < 65;
+    const approaching = pct < TILE_ON_PCT;
     const deep = pct >= TILE_ON_PCT;
     const extreme = pct >= 92;
-    // Same zoom speed at every depth; only ease damping/rotate in deep zoom for stability.
-    controls.zoomSpeed = 0.22;
+    const maxed = pct >= 97;
     if (overview) {
       controls.dampingFactor = 0.1;
       controls.rotateSpeed = 0.3;
+      controls.zoomSpeed = 0.16;
     } else if (cruising) {
       controls.dampingFactor = 0.13;
       controls.rotateSpeed = Math.max(0.14, Math.min(0.34, alt * 0.15));
+      controls.zoomSpeed = 0.13;
+    } else if (approaching) {
+      controls.dampingFactor = 0.15;
+      controls.rotateSpeed = Math.max(0.1, Math.min(0.28, alt * 0.14));
+      controls.zoomSpeed = 0.1;
     } else {
-      controls.dampingFactor = extreme ? 0.22 : deep ? 0.18 : 0.16;
-      controls.rotateSpeed = extreme ? 0.04 : deep ? 0.08 : Math.max(0.1, Math.min(0.34, alt * 0.16));
+      controls.dampingFactor = maxed ? 0.24 : extreme ? 0.2 : 0.18;
+      controls.rotateSpeed = maxed ? 0.04 : extreme ? 0.06 : 0.08;
+      controls.zoomSpeed = maxed ? 0.02 : extreme ? 0.04 : 0.07;
     }
     if (deep && autoRotateEnabled) controls.autoRotate = false;
     else if (!deep && autoRotateEnabled) controls.autoRotate = true;
@@ -420,7 +442,7 @@ window.WorldGlobe = (() => {
     if (tilesActive ? pct < TILE_OFF_PCT : pct < TILE_ON_PCT) return 0;
     const quality = qualityAtPercent(pct);
     if (!quality?.level) return isMobileViewport() ? 10 : 10;
-    return isMobileViewport() ? Math.min(quality.level, 13) : quality.level;
+    return isMobileViewport() ? Math.min(quality.level, 15) : quality.level;
   }
 
   function tileCurvatureForAltitude(alt) {
