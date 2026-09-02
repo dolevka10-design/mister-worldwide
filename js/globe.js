@@ -32,9 +32,9 @@ window.WorldGlobe = (() => {
   const MAX_POV_ALT = 3.2;
   const ALT_DISPLAY_FAR = 2.5;
   const ZOOM_MIN = 1;
-  const ZOOM_MAX = 40;
-  const ZOOM_TILE_ON = 22;
-  const ZOOM_TILE_OFF = 20;
+  const ZOOM_MAX = 70;
+  const ZOOM_TILE_ON = 30;
+  const ZOOM_TILE_OFF = 28;
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
