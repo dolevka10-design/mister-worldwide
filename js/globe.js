@@ -74,7 +74,12 @@ window.WorldGlobe = (() => {
   let pinClicksEnabled = true;
   let pinLockTimer = null;
   let wheelZoomHandler = null;
+  let controlsInteracting = false;
+  let lastTileSyncPct = -1;
+  let wheelZoomTimer = null;
   const PIN_UNLOCK_MS = 150;
+  const TILE_SYNC_PCT_STEP = 3;
+  const WHEEL_ZOOM_SETTLE_MS = 140;
 
   function loadRotatePref() {
     try {
@@ -390,25 +395,25 @@ window.WorldGlobe = (() => {
     const extreme = pct >= 92;
     const maxed = pct >= 97;
     if (overview) {
-      controls.dampingFactor = 0.1;
-      controls.rotateSpeed = 0.3;
+      controls.dampingFactor = 0.12;
+      controls.rotateSpeed = 0.26;
       controls.zoomSpeed = 0.16;
     } else if (cruising) {
-      controls.dampingFactor = 0.13;
-      controls.rotateSpeed = Math.max(0.14, Math.min(0.34, alt * 0.15));
+      controls.dampingFactor = 0.17;
+      controls.rotateSpeed = 0.12;
       controls.zoomSpeed = 0.13;
     } else if (approaching) {
-      controls.dampingFactor = 0.15;
-      controls.rotateSpeed = Math.max(0.1, Math.min(0.28, alt * 0.14));
+      controls.dampingFactor = 0.22;
+      controls.rotateSpeed = 0.08;
       controls.zoomSpeed = 0.1;
     } else {
-      controls.dampingFactor = maxed ? 0.24 : extreme ? 0.2 : 0.18;
-      controls.rotateSpeed = maxed ? 0.04 : extreme ? 0.06 : 0.08;
+      controls.dampingFactor = maxed ? 0.34 : extreme ? 0.3 : 0.26;
+      controls.rotateSpeed = maxed ? 0.028 : extreme ? 0.04 : 0.055;
       controls.zoomSpeed = maxed ? 0.02 : extreme ? 0.04 : 0.07;
     }
     if (deep && autoRotateEnabled) controls.autoRotate = false;
     else if (!deep && autoRotateEnabled) controls.autoRotate = true;
-    applyBaseGlobeCurvature(pct);
+    if (!controlsInteracting) applyBaseGlobeCurvature(pct);
   }
 
   function setPinClicksEnabled(enabled) {
@@ -456,7 +461,9 @@ window.WorldGlobe = (() => {
     if (!globe) return;
     const next = tileCurvatureForAltitude(alt);
     try {
-      if (globe.globeCurvatureResolution?.() !== next) globe.globeCurvatureResolution(next);
+      const current = globe.globeCurvatureResolution?.();
+      if (current != null && Math.abs(current - next) < 1) return;
+      if (current !== next) globe.globeCurvatureResolution(next);
     } catch {
       /* ignore */
     }
@@ -488,7 +495,7 @@ window.WorldGlobe = (() => {
         globe.globeTileEngineUrl(tileUrlFor);
         tilesActive = true;
         tileMaxLevel = nextLevel;
-      } else if (nextLevel !== tileMaxLevel) {
+      } else if (nextLevel !== tileMaxLevel && Math.abs(nextLevel - tileMaxLevel) >= 1) {
         globe.globeTileEngineMaxLevel(nextLevel);
         tileMaxLevel = nextLevel;
       }
@@ -503,17 +510,31 @@ window.WorldGlobe = (() => {
     }
   }
 
-  function syncZoomTiles() {
+  function syncZoomTiles({ force = false } = {}) {
     if (!globe) return;
     const pov = globe.pointOfView?.() || DEFAULT_POV;
     const alt = pov.altitude;
+    const pct = zoomPercent(alt);
     const targetLevel = maxTileLevelForAltitude(alt);
+    if (
+      !force &&
+      controlsInteracting &&
+      targetLevel > 0 &&
+      tilesActive &&
+      lastTileSyncPct >= 0 &&
+      Math.abs(pct - lastTileSyncPct) < TILE_SYNC_PCT_STEP
+    ) {
+      updateZoomHud(pov);
+      return;
+    }
     if (targetLevel <= 0) {
       if (tilesActive) disableZoomTiles();
+      lastTileSyncPct = pct;
       updateZoomHud(pov);
       return;
     }
     enableZoomTiles(targetLevel, alt);
+    lastTileSyncPct = pct;
     updateZoomHud(pov);
   }
 
@@ -911,24 +932,30 @@ window.WorldGlobe = (() => {
     controls.enablePan = false;
     controls.enableRotate = true;
     controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
+    controls.dampingFactor = 0.12;
+    if ("zoomToCursor" in controls) controls.zoomToCursor = false;
     controls.minDistance = globeR * (1 + MIN_POV_ALT);
     controls.maxDistance = globeR * (1 + MAX_POV_ALT);
     const pov = globe.pointOfView?.() || DEFAULT_POV;
     syncControlSpeeds(pov);
     controls.addEventListener("start", () => {
+      controlsInteracting = true;
       globeDragging = true;
       lockPinClicks();
+      syncControlSpeeds(globe.pointOfView?.() || pov);
     });
     controls.addEventListener("end", () => {
+      controlsInteracting = false;
       unlockPinClicks();
       setTimeout(() => {
         globeDragging = false;
+        const endPov = globe.pointOfView?.() || DEFAULT_POV;
+        enforcePovLimits(endPov);
+        syncControlSpeeds(endPov);
+        syncZoomTiles({ force: true });
         scheduleCityPinRefresh(80);
-        syncZoomTiles();
-        enforcePovLimits();
         updateZoomHud();
-        if (zoomPercent(globe.pointOfView?.().altitude ?? DEFAULT_POV.altitude) < TILE_OFF_PCT && !tilesActive) {
+        if (zoomPercent(endPov.altitude ?? DEFAULT_POV.altitude) < TILE_OFF_PCT && !tilesActive) {
           setZoomBarVisible(false);
         }
       }, 60);
@@ -936,22 +963,40 @@ window.WorldGlobe = (() => {
     const onWheelZoom = () => {
       lockPinClicks();
       unlockPinClicks();
+      controlsInteracting = true;
+      clearTimeout(wheelZoomTimer);
+      wheelZoomTimer = setTimeout(() => {
+        controlsInteracting = false;
+        const endPov = globe.pointOfView?.() || DEFAULT_POV;
+        enforcePovLimits(endPov);
+        syncControlSpeeds(endPov);
+        syncZoomTiles({ force: true });
+        scheduleCityPinRefresh(80);
+      }, WHEEL_ZOOM_SETTLE_MS);
     };
     wheelZoomHandler = onWheelZoom;
     container?.addEventListener("wheel", wheelZoomHandler, { passive: true });
     controls.addEventListener("change", () => {
       const nextPov = globe.pointOfView?.();
-      enforcePovLimits(nextPov);
-      syncControlSpeeds(globe.pointOfView?.() || nextPov);
-      noteZoomInteraction(globe.pointOfView?.() || nextPov);
+      if (!controlsInteracting) enforcePovLimits(nextPov);
+      noteZoomInteraction(nextPov);
+      if (controlsInteracting) {
+        updateZoomHud(nextPov);
+        return;
+      }
+      syncControlSpeeds(nextPov);
       scheduleCityPinRefresh(220);
       scheduleZoomTileSync();
     });
     applyAutoRotate();
     globe.onZoom?.((nextPov) => {
-      enforcePovLimits(nextPov);
-      syncControlSpeeds(nextPov);
+      if (!controlsInteracting) enforcePovLimits(nextPov);
       noteZoomInteraction(nextPov);
+      if (controlsInteracting) {
+        updateZoomHud(nextPov);
+        return;
+      }
+      syncControlSpeeds(nextPov);
       scheduleZoomTileSync();
     });
   }
@@ -1086,10 +1131,14 @@ window.WorldGlobe = (() => {
     clearTimeout(cityPinRefreshTimer);
     clearTimeout(zoomHudHideTimer);
     clearTimeout(pinLockTimer);
+    clearTimeout(wheelZoomTimer);
+    wheelZoomTimer = null;
     if (container && wheelZoomHandler) {
       container.removeEventListener("wheel", wheelZoomHandler);
     }
     wheelZoomHandler = null;
+    controlsInteracting = false;
+    lastTileSyncPct = -1;
     pinClicksEnabled = true;
     if (tileSyncRaf) cancelAnimationFrame(tileSyncRaf);
     tileSyncRaf = null;
