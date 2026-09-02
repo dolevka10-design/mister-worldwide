@@ -28,7 +28,7 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const MIN_POV_ALT = 0.027;
+  const MIN_POV_ALT = 0.019;
   const MAX_POV_ALT = 3.2;
   const ALT_DISPLAY_FAR = 2.5;
   // Fixed physical altitudes — stamped hi-res entry / exit (independent of HUD % scale)
@@ -190,11 +190,6 @@ window.WorldGlobe = (() => {
     return Math.round(((ALT_DISPLAY_FAR - clamped) / (ALT_DISPLAY_FAR - MIN_POV_ALT)) * 100);
   }
 
-  function altitudeForPercent(pct) {
-    const t = Math.max(0, Math.min(100, pct)) / 100;
-    return ALT_DISPLAY_FAR - t * (ALT_DISPLAY_FAR - MIN_POV_ALT);
-  }
-
   const TILE_ON_PCT = zoomPercent(TILE_ON_ALT);
   const TILE_OFF_PCT = zoomPercent(TILE_OFF_ALT);
 
@@ -282,10 +277,18 @@ window.WorldGlobe = (() => {
     const controls = globe?.controls();
     if (!controls || !pov) return;
     const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
-    const close = alt < TILE_OFF_ALT;
-    const extreme = alt < 0.09;
-    controls.rotateSpeed = extreme ? 0.05 : close ? 0.08 : Math.max(0.1, Math.min(0.38, alt * 0.16));
-    controls.zoomSpeed = extreme ? 0.02 : close ? 0.04 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
+    const pct = zoomPercent(alt);
+    const deep = pct >= 82;
+    const extreme = pct >= 92;
+    const maxed = pct >= 97;
+    controls.dampingFactor = maxed ? 0.3 : extreme ? 0.24 : deep ? 0.2 : 0.16;
+    controls.rotateSpeed = maxed ? 0.018 : extreme ? 0.03 : deep ? 0.05 : Math.max(0.1, Math.min(0.38, alt * 0.16));
+    controls.zoomSpeed = maxed ? 0.006 : extreme ? 0.01 : deep ? 0.02 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
+    if (deep && autoRotateEnabled) {
+      controls.autoRotate = false;
+    } else if (!deep && autoRotateEnabled) {
+      controls.autoRotate = true;
+    }
   }
 
   function enforcePovLimits(pov = globe?.pointOfView?.()) {
