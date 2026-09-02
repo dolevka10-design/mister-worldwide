@@ -463,6 +463,10 @@ html, body {
   position: relative;
   z-index: 8;
 }
+.globe-canvas.globe-pins-locked .globe-flag-pin,
+.globe-canvas.globe-pins-locked .globe-city-pin {
+  pointer-events: none;
+}
 
 .globe-flag-pin {
   display: flex;

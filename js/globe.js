@@ -38,9 +38,16 @@ window.WorldGlobe = (() => {
   const HOME_FLIGHT_MS = 1600;
   const STANDARD_STAGES = [
     { minPct: 0, curvature: 5, label: "Standard globe" },
+    { minPct: 10, curvature: 5, label: "Standard globe" },
+    { minPct: 20, curvature: 5, label: "Standard globe" },
     { minPct: 25, curvature: 5, label: "Standard globe" },
+    { minPct: 30, curvature: 4, label: "Regional" },
     { minPct: 40, curvature: 4, label: "Regional" },
+    { minPct: 45, curvature: 4, label: "Regional" },
+    { minPct: 50, curvature: 4, label: "Regional+" },
     { minPct: 55, curvature: 4, label: "Regional+" },
+    { minPct: 60, curvature: 3, label: "Closer" },
+    { minPct: 65, curvature: 3, label: "Closer" },
     { minPct: 70, curvature: 3, label: "Closer" },
   ];
   let TILE_ON_PCT = 0;
@@ -59,6 +66,10 @@ window.WorldGlobe = (() => {
   let zoomModeEl = null;
   let zoomFillEl = null;
   let lastHudAlt = null;
+  let pinClicksEnabled = true;
+  let pinLockTimer = null;
+  let wheelZoomHandler = null;
+  const PIN_UNLOCK_MS = 150;
 
   function loadRotatePref() {
     try {
@@ -191,36 +202,31 @@ window.WorldGlobe = (() => {
     return Math.round(((ALT_DISPLAY_FAR - clamped) / (ALT_DISPLAY_FAR - MIN_POV_ALT)) * 100);
   }
 
+  function hiResLabelForT(t) {
+    if (t < 0.12) return "Satellite";
+    if (t < 0.28) return "Satellite+";
+    if (t < 0.48) return "Hi-res";
+    if (t < 0.68) return "Hi-res+";
+    if (t < 0.84) return "Detail";
+    if (t < 0.94) return "Detail+";
+    return "Max detail";
+  }
+
   function initZoomScale() {
     TILE_ON_PCT = zoomPercent(TILE_ON_ALT);
     TILE_OFF_PCT = zoomPercent(TILE_OFF_ALT);
-    const step = 2;
+    const step = 1;
     const minLevel = 10;
     const maxLevel = 15;
-    const labels = [
-      "Satellite",
-      "Satellite",
-      "Satellite+",
-      "Hi-res",
-      "Hi-res",
-      "Hi-res+",
-      "Detail",
-      "Detail",
-      "Detail+",
-      "Max detail",
-      "Max detail",
-    ];
     HI_RES_TIERS = [];
-    let idx = 0;
     for (let pct = TILE_ON_PCT; pct < 100; pct += step) {
       const t = (pct - TILE_ON_PCT) / Math.max(1, 100 - TILE_ON_PCT);
       HI_RES_TIERS.push({
         minPct: pct,
         level: Math.round(minLevel + t * (maxLevel - minLevel)),
         curvature: Math.max(2, Math.round(5 - t * 3)),
-        label: labels[Math.min(idx, labels.length - 1)],
+        label: hiResLabelForT(t),
       });
-      idx += 1;
     }
     HI_RES_TIERS.push({ minPct: 100, level: maxLevel, curvature: 2, label: "Max detail" });
   }
@@ -281,6 +287,7 @@ window.WorldGlobe = (() => {
     track._ticksBound = true;
     for (const stage of STANDARD_STAGES) {
       if (stage.minPct <= 0) continue;
+      if (stage.minPct % 10 !== 0 && stage.minPct !== 25 && stage.minPct !== 70) continue;
       const tick = document.createElement("span");
       tick.className = "globe-zoom-tick is-standard";
       tick.style.left = `${stage.minPct}%`;
@@ -294,6 +301,7 @@ window.WorldGlobe = (() => {
     track.appendChild(entry);
     for (const tier of HI_RES_TIERS) {
       if (tier.minPct <= TILE_ON_PCT) continue;
+      if ((tier.minPct - TILE_ON_PCT) % 5 !== 0 && tier.minPct !== 100) continue;
       const tick = document.createElement("span");
       tick.className = "globe-zoom-tick is-hires";
       tick.style.left = `${tier.minPct}%`;
@@ -364,23 +372,36 @@ window.WorldGlobe = (() => {
     const cruising = pct < 65;
     const deep = pct >= TILE_ON_PCT;
     const extreme = pct >= 92;
-    const maxed = pct >= 97;
+    // Same zoom speed at every depth; only ease damping/rotate in deep zoom for stability.
+    controls.zoomSpeed = 0.22;
     if (overview) {
       controls.dampingFactor = 0.1;
       controls.rotateSpeed = 0.3;
-      controls.zoomSpeed = 0.22;
     } else if (cruising) {
       controls.dampingFactor = 0.13;
       controls.rotateSpeed = Math.max(0.14, Math.min(0.34, alt * 0.15));
-      controls.zoomSpeed = Math.max(0.08, Math.min(0.24, (alt + 0.2) * 0.09));
     } else {
-      controls.dampingFactor = maxed ? 0.3 : extreme ? 0.24 : deep ? 0.2 : 0.16;
-      controls.rotateSpeed = maxed ? 0.018 : extreme ? 0.03 : deep ? 0.05 : Math.max(0.1, Math.min(0.38, alt * 0.16));
-      controls.zoomSpeed = maxed ? 0.006 : extreme ? 0.01 : deep ? 0.02 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
+      controls.dampingFactor = extreme ? 0.22 : deep ? 0.18 : 0.16;
+      controls.rotateSpeed = extreme ? 0.04 : deep ? 0.08 : Math.max(0.1, Math.min(0.34, alt * 0.16));
     }
     if (deep && autoRotateEnabled) controls.autoRotate = false;
     else if (!deep && autoRotateEnabled) controls.autoRotate = true;
     applyBaseGlobeCurvature(pct);
+  }
+
+  function setPinClicksEnabled(enabled) {
+    pinClicksEnabled = !!enabled;
+    container?.classList.toggle("globe-pins-locked", !pinClicksEnabled);
+  }
+
+  function lockPinClicks() {
+    clearTimeout(pinLockTimer);
+    setPinClicksEnabled(false);
+  }
+
+  function unlockPinClicks(delay = PIN_UNLOCK_MS) {
+    clearTimeout(pinLockTimer);
+    pinLockTimer = setTimeout(() => setPinClicksEnabled(true), delay);
   }
 
   function enforcePovLimits(pov = globe?.pointOfView?.()) {
@@ -651,6 +672,7 @@ window.WorldGlobe = (() => {
       true
     );
     el.addEventListener("click", (e) => {
+      if (!pinClicksEnabled || globeDragging) return;
       e.preventDefault();
       e.stopPropagation();
       onTap();
@@ -747,6 +769,7 @@ window.WorldGlobe = (() => {
     el.addEventListener("pointercancel", onPointerEnd, { passive: true });
 
     const pick = (e) => {
+      if (!pinClicksEnabled) return;
       const cityPin = e.target.closest?.(".globe-city-pin");
       if (cityPin?.dataset?.countryId && cityPin.dataset.city) {
         const session = el._lastPointerSession;
@@ -873,8 +896,10 @@ window.WorldGlobe = (() => {
     syncControlSpeeds(pov);
     controls.addEventListener("start", () => {
       globeDragging = true;
+      lockPinClicks();
     });
     controls.addEventListener("end", () => {
+      unlockPinClicks();
       setTimeout(() => {
         globeDragging = false;
         scheduleCityPinRefresh(80);
@@ -886,6 +911,12 @@ window.WorldGlobe = (() => {
         }
       }, 60);
     });
+    const onWheelZoom = () => {
+      lockPinClicks();
+      unlockPinClicks();
+    };
+    wheelZoomHandler = onWheelZoom;
+    container?.addEventListener("wheel", wheelZoomHandler, { passive: true });
     controls.addEventListener("change", () => {
       const nextPov = globe.pointOfView?.();
       enforcePovLimits(nextPov);
@@ -1032,6 +1063,12 @@ window.WorldGlobe = (() => {
   function destroy() {
     clearTimeout(cityPinRefreshTimer);
     clearTimeout(zoomHudHideTimer);
+    clearTimeout(pinLockTimer);
+    if (container && wheelZoomHandler) {
+      container.removeEventListener("wheel", wheelZoomHandler);
+    }
+    wheelZoomHandler = null;
+    pinClicksEnabled = true;
     if (tileSyncRaf) cancelAnimationFrame(tileSyncRaf);
     tileSyncRaf = null;
     disableZoomTiles();
