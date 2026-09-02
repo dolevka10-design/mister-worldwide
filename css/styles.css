@@ -426,11 +426,11 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.12rem;
+  gap: 0.1rem;
   cursor: pointer;
   border: none;
   background: transparent;
-  padding: 0.2rem 0.35rem;
+  padding: 0;
   margin: 0;
   font: inherit;
   color: inherit;
@@ -442,6 +442,15 @@ html, body {
 .globe-city-pin:hover {
   transform: translate(-50%, -100%) scale(1.08);
   z-index: 9;
+}
+.globe-city-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
 }
 .globe-city-label {
   font-size: 0.62rem;

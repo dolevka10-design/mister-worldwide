@@ -28,12 +28,12 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const TILE_ENABLE_ALT = 2.05;
-  const TILE_DISABLE_ALT = 2.18;
+  const TILE_MAX_ALT = 2.5;
+  const TILE_MIN_ALT = 0.72;
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
-  let tileSyncTimer = null;
+  let tileSyncRaf = null;
   let tilesActive = false;
   let tileMaxLevel = 0;
   let allCityPinsCache = [];
@@ -163,19 +163,42 @@ window.WorldGlobe = (() => {
     return EARTH_TILE_URL.replace("{x}", x).replace("{y}", y).replace("{l}", l);
   }
 
+  function smoothstep(t) {
+    const x = Math.max(0, Math.min(1, t));
+    return x * x * (3 - 2 * x);
+  }
+
   function maxTileLevelForAltitude(alt) {
-    if (!Number.isFinite(alt)) return 10;
+    if (!Number.isFinite(alt) || alt >= TILE_MAX_ALT) return 0;
     const mobile = isMobileViewport();
-    if (alt <= 1.0) return mobile ? 13 : 14;
-    if (alt <= 1.35) return mobile ? 12 : 13;
-    if (alt <= 1.65) return 11;
-    return 10;
+    const cap = mobile ? 14 : 15;
+    const minLevel = 7;
+    const t = smoothstep((TILE_MAX_ALT - alt) / (TILE_MAX_ALT - TILE_MIN_ALT));
+    return Math.round(minLevel + t * (cap - minLevel));
+  }
+
+  function tileCurvatureForAltitude(alt) {
+    if (!Number.isFinite(alt) || alt >= TILE_MAX_ALT) return 5;
+    if (alt <= 1.1) return 3;
+    if (alt <= 1.6) return 4;
+    return 5;
+  }
+
+  function applyTileCurvature(alt) {
+    if (!globe) return;
+    const next = tileCurvatureForAltitude(alt);
+    try {
+      if (globe.globeCurvatureResolution?.() !== next) globe.globeCurvatureResolution(next);
+    } catch {
+      /* ignore */
+    }
   }
 
   function disableZoomTiles() {
     if (!globe || !tilesActive) return;
     try {
       globe.globeTileEngineUrl(null);
+      globe.globeCurvatureResolution?.(5);
     } catch (e) {
       console.warn("Disable globe tiles failed", e);
     }
@@ -183,10 +206,11 @@ window.WorldGlobe = (() => {
     tileMaxLevel = 0;
   }
 
-  function enableZoomTiles(level) {
+  function enableZoomTiles(level, alt) {
     if (!globe) return;
-    const nextLevel = Math.max(8, level || 10);
+    const nextLevel = Math.max(7, level || 7);
     try {
+      applyTileCurvature(alt);
       if (!tilesActive) {
         globe.globeTileEngineMaxLevel(nextLevel);
         globe.globeTileEngineUrl(tileUrlFor);
@@ -207,23 +231,20 @@ window.WorldGlobe = (() => {
     if (!globe) return;
     const pov = globe.pointOfView?.() || DEFAULT_POV;
     const alt = pov.altitude;
-    if (tilesActive && alt >= TILE_DISABLE_ALT) {
-      disableZoomTiles();
+    const targetLevel = maxTileLevelForAltitude(alt);
+    if (targetLevel <= 0) {
+      if (tilesActive) disableZoomTiles();
       return;
     }
-    if (!tilesActive && alt < TILE_ENABLE_ALT) {
-      enableZoomTiles(maxTileLevelForAltitude(alt));
-      return;
-    }
-    if (tilesActive) {
-      const nextLevel = maxTileLevelForAltitude(alt);
-      if (nextLevel !== tileMaxLevel) enableZoomTiles(nextLevel);
-    }
+    enableZoomTiles(targetLevel, alt);
   }
 
-  function scheduleZoomTileSync(delay = 200) {
-    clearTimeout(tileSyncTimer);
-    tileSyncTimer = setTimeout(syncZoomTiles, delay);
+  function scheduleZoomTileSync() {
+    if (tileSyncRaf) return;
+    tileSyncRaf = requestAnimationFrame(() => {
+      tileSyncRaf = null;
+      syncZoomTiles();
+    });
   }
 
   function resetDefaultView({ duration = 900 } = {}) {
@@ -395,7 +416,8 @@ window.WorldGlobe = (() => {
     const shortCity = d.city.length > 14 ? `${d.city.slice(0, 12)}…` : d.city;
     el.innerHTML = `
       <span class="globe-city-label">${shortCity}</span>
-      <span class="globe-city-count">${d.placeCount}</span>`;
+      <span class="globe-city-count">${d.placeCount}</span>
+      <span class="globe-city-dot" aria-hidden="true"></span>`;
     return el;
   }
 
@@ -572,7 +594,9 @@ window.WorldGlobe = (() => {
     controls.enablePan = true;
     controls.enableRotate = true;
     controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
+    controls.dampingFactor = 0.12;
+    controls.zoomSpeed = 0.85;
+    controls.rotateSpeed = 0.55;
     controls.minDistance = 95;
     controls.maxDistance = 420;
     controls.addEventListener("start", () => {
@@ -582,16 +606,16 @@ window.WorldGlobe = (() => {
       setTimeout(() => {
         globeDragging = false;
         scheduleCityPinRefresh(80);
-        scheduleZoomTileSync(60);
+        syncZoomTiles();
       }, 60);
     });
     controls.addEventListener("change", () => {
       scheduleCityPinRefresh(220);
-      scheduleZoomTileSync(180);
+      scheduleZoomTileSync();
     });
     applyAutoRotate();
     globe.onZoom?.(() => {
-      scheduleZoomTileSync(120);
+      scheduleZoomTileSync();
     });
   }
 
@@ -701,7 +725,7 @@ window.WorldGlobe = (() => {
     if (w <= 0 || h <= 0) return;
     globe.width(w).height(h);
     applyGlobeQuality();
-    scheduleZoomTileSync(80);
+    scheduleZoomTileSync();
     scheduleCityPinRefresh(120);
   }
 
@@ -715,7 +739,8 @@ window.WorldGlobe = (() => {
 
   function destroy() {
     clearTimeout(cityPinRefreshTimer);
-    clearTimeout(tileSyncTimer);
+    if (tileSyncRaf) cancelAnimationFrame(tileSyncRaf);
+    tileSyncRaf = null;
     disableZoomTiles();
     window.removeEventListener("resize", onResize);
     if (resizeObserver) resizeObserver.disconnect();
@@ -747,5 +772,6 @@ window.WorldGlobe = (() => {
     isAutoRotate: () => autoRotateEnabled,
     setPinsVisible,
     resetDefaultView,
+    refreshCityPins: refreshCityPinsForView,
   };
 })();

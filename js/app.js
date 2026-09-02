@@ -18,6 +18,9 @@ window.WorldApp = (() => {
   let placeIdFilter = null;
   let dayPanelLabel = "";
   let placeIdOrder = [];
+  const CITY_CENTER_KEY = "mister-worldwide-city-centers";
+  const cityCenterCache = new Map();
+  let cityCenterResolveGen = 0;
 
   const $ = (id) => document.getElementById(id);
 
@@ -44,6 +47,7 @@ window.WorldApp = (() => {
       WorldGlobe.updatePins(countriesForUi(state));
       renderCountryPanel();
       renderStats();
+      resolveCityCenters();
     }
   }
 
@@ -81,6 +85,7 @@ window.WorldApp = (() => {
     if (selectedCountry) renderCountryPanel();
     if (WorldGlobe.isReady?.()) {
       WorldGlobe.updatePins(countriesForUi(state));
+      resolveCityCenters();
     } else if (!$("app-root")?.classList.contains("hidden")) {
       ensureGlobe();
     }
@@ -224,6 +229,132 @@ window.WorldApp = (() => {
     placeIdOrder = [];
   }
 
+  function loadCityCenterCache() {
+    try {
+      const raw = localStorage.getItem(CITY_CENTER_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== "object") return;
+      for (const [key, val] of Object.entries(data)) {
+        if (Number.isFinite(val?.lat) && Number.isFinite(val?.lng)) cityCenterCache.set(key, { lat: val.lat, lng: val.lng });
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function saveCityCenterCache() {
+    try {
+      const data = Object.fromEntries(cityCenterCache);
+      localStorage.setItem(CITY_CENTER_KEY, JSON.stringify(data));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function medianCoord(values) {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function fallbackCityCenter(places) {
+    const lat = medianCoord(places.map((p) => p.lat));
+    const lng = medianCoord(places.map((p) => p.lng));
+    return { lat, lng };
+  }
+
+  function cityCenterKey(countryId, city) {
+    return `${countryId}|${city}`;
+  }
+
+  function countryNameForId(countryId) {
+    return state?.countries?.find((c) => c.id === countryId)?.name || "";
+  }
+
+  function nearPlaceCluster(center, places, maxDeg = 4.5) {
+    const ref = fallbackCityCenter(places);
+    if (!ref || !center) return false;
+    const dLat = center.lat - ref.lat;
+    let dLng = center.lng - ref.lng;
+    while (dLng > 180) dLng -= 360;
+    while (dLng < -180) dLng += 360;
+    return Math.hypot(dLat, dLng) <= maxDeg;
+  }
+
+  async function geocodeCityCenter(city, countryName, places) {
+    const q = [city, countryName].filter(Boolean).join(", ");
+    if (!q) return null;
+    try {
+      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const features = data?.features || [];
+      const cityLower = city.toLowerCase();
+      const preferredTypes = new Set(["city", "town", "municipality", "locality", "district", "borough"]);
+      const ranked = features
+        .map((f) => {
+          const [lng, lat] = f.geometry?.coordinates || [];
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+          const p = f.properties || {};
+          const name = String(p.name || p.city || "").toLowerCase();
+          const type = String(p.type || p.osm_value || "").toLowerCase();
+          let score = 0;
+          if (name === cityLower) score += 8;
+          else if (name.includes(cityLower) || cityLower.includes(name)) score += 4;
+          if (preferredTypes.has(type)) score += 5;
+          if (p.country && countryName && String(p.country).toLowerCase() === countryName.toLowerCase()) score += 3;
+          return { lat, lng, score };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score);
+      for (const hit of ranked) {
+        if (hit.score < 4) continue;
+        if (!nearPlaceCluster(hit, places)) continue;
+        return { lat: hit.lat, lng: hit.lng };
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  async function resolveCityCenters() {
+    if (!state?.places?.length) return;
+    const gen = ++cityCenterResolveGen;
+    const groups = new Map();
+    for (const p of state.places) {
+      const city = String(p.city || "").trim();
+      if (!city || city === "Other") continue;
+      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+      const key = cityCenterKey(p.countryId, city);
+      if (cityCenterCache.has(key)) continue;
+      if (!groups.has(key)) groups.set(key, { countryId: p.countryId, city, places: [] });
+      groups.get(key).places.push(p);
+    }
+    const pending = [...groups.values()];
+    if (!pending.length) return;
+    const batchSize = 5;
+    for (let i = 0; i < pending.length; i += batchSize) {
+      if (gen !== cityCenterResolveGen) return;
+      const batch = pending.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (g) => {
+          const key = cityCenterKey(g.countryId, g.city);
+          const coords = await geocodeCityCenter(g.city, countryNameForId(g.countryId), g.places);
+          if (coords) cityCenterCache.set(key, coords);
+        })
+      );
+      if (gen !== cityCenterResolveGen) return;
+      if (cityCenterCache.size) saveCityCenterCache();
+      if (WorldGlobe.getPinViewMode?.() === "city" && WorldGlobe.isReady?.()) {
+        WorldGlobe.refreshCityPins?.();
+      }
+      if (i + batchSize < pending.length) await new Promise((r) => setTimeout(r, 80));
+    }
+  }
+
   function cityPinsForCountry(countryId) {
     return allCityPins().filter((p) => p.countryId === countryId);
   }
@@ -235,15 +366,22 @@ window.WorldApp = (() => {
       const city = String(p.city || "").trim();
       if (!city || city === "Other") continue;
       if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
-      const key = `${p.countryId}|${city}`;
+      const key = cityCenterKey(p.countryId, city);
       if (!groups.has(key)) groups.set(key, { countryId: p.countryId, city, places: [] });
       groups.get(key).places.push(p);
     }
     const pins = [];
     for (const g of groups.values()) {
-      const lat = g.places.reduce((s, p) => s + p.lat, 0) / g.places.length;
-      const lng = g.places.reduce((s, p) => s + p.lng, 0) / g.places.length;
-      pins.push({ countryId: g.countryId, city: g.city, lat, lng, placeCount: g.places.length });
+      const key = cityCenterKey(g.countryId, g.city);
+      const cached = cityCenterCache.get(key);
+      const center = cached || fallbackCityCenter(g.places);
+      pins.push({
+        countryId: g.countryId,
+        city: g.city,
+        lat: center.lat,
+        lng: center.lng,
+        placeCount: g.places.length,
+      });
     }
     return pins;
   }
@@ -732,6 +870,7 @@ window.WorldApp = (() => {
           getAllCityPins: allCityPins,
         });
         ready = true;
+        resolveCityCenters();
       } else {
         WorldGlobe.resize();
         WorldGlobe.updatePins(countriesForUi(state));
@@ -848,6 +987,7 @@ window.WorldApp = (() => {
   async function start() {
     try {
       initTheme();
+      loadCityCenterCache();
       bindUi();
       bindAuth();
       watchMainView();
