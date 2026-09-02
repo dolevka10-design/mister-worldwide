@@ -243,8 +243,8 @@ window.WorldGlobe = (() => {
     const controls = globe?.controls();
     if (!controls || !pov) return;
     const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
-    controls.rotateSpeed = Math.max(0.12, Math.min(0.42, alt * 0.18));
-    controls.zoomSpeed = Math.max(0.08, Math.min(0.35, (alt + 0.4) * 0.12));
+    controls.rotateSpeed = Math.max(0.1, Math.min(0.38, alt * 0.16));
+    controls.zoomSpeed = Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
   }
 
   function enforcePovLimits(pov = globe?.pointOfView?.()) {
