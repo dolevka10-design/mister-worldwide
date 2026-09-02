@@ -279,7 +279,7 @@
     },
     {
       name: "planner_create_trip",
-      description: "Create a travel planner trip for a country and city.",
+      description: "Create a travel planner trip with one or more city/country segments and day count.",
       parameters: {
         type: "OBJECT",
         properties: {
@@ -287,8 +287,87 @@
           city: { type: "STRING" },
           name: { type: "STRING" },
           days: { type: "INTEGER", description: "Number of days (default 3)" },
+          start_date: { type: "STRING", description: "ISO date YYYY-MM-DD" },
+          end_date: { type: "STRING", description: "ISO date YYYY-MM-DD" },
         },
         required: ["country", "city"],
+      },
+    },
+    {
+      name: "planner_build_trip",
+      description: "Create a full trip from scratch: segments (cities/countries/dates), activities (day, time, place, location, category, Maps URL, notes), and optional getting-around guides. Persists to cloud.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          start_date: { type: "STRING" },
+          end_date: { type: "STRING" },
+          days: { type: "INTEGER" },
+          segments: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                country: { type: "STRING" },
+                city: { type: "STRING" },
+                start_date: { type: "STRING" },
+                end_date: { type: "STRING" },
+              },
+            },
+          },
+          activities: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                day: { type: "INTEGER" },
+                date: { type: "STRING" },
+                name: { type: "STRING" },
+                place: { type: "STRING" },
+                time: { type: "STRING" },
+                location: { type: "STRING" },
+                city: { type: "STRING" },
+                country: { type: "STRING" },
+                category: { type: "STRING", description: "Food & Dining, Sightseeing / Attraction, Transportation / Flight, etc." },
+                url: { type: "STRING", description: "Google Maps URL" },
+                notes: { type: "STRING" },
+              },
+            },
+          },
+          guides: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                title: { type: "STRING" },
+                body: { type: "STRING" },
+                city: { type: "STRING" },
+              },
+            },
+          },
+          timeline: { type: "BOOLEAN", description: "Open trip in Timeline view (default true)" },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "planner_add_activity",
+      description: "Add one activity row to a planner day with name, time, location/city, category, Maps URL, and notes. Creates a globe place when possible.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          trip_id: { type: "STRING" },
+          day: { type: "INTEGER" },
+          name: { type: "STRING" },
+          time: { type: "STRING" },
+          location: { type: "STRING", description: "City or stop name for this row" },
+          city: { type: "STRING" },
+          country: { type: "STRING" },
+          category: { type: "STRING", description: "Food & Dining, Sightseeing / Attraction, Transportation / Flight, Coffee & Snacks, etc." },
+          url: { type: "STRING", description: "Google Maps URL" },
+          notes: { type: "STRING" },
+        },
+        required: ["day", "name"],
       },
     },
     {
@@ -889,8 +968,9 @@
       "You are the Mister Worldwide AI travel assistant.",
       `You are helping ${name} (${who}), an allowlisted user.`,
       "Data is PRIVATE to this signed-in user. You manage countries, Google Maps saved places on a 3D globe, and Travel Planner trips.",
-      "Planner itinerary columns: Date, Day, Location, Time/Order, Place/Activity, Notes, Category, Google Maps link.",
-      "Trips are one scrollable document grouped by location then day. Use planner_create_trip, planner_add_segment, planner_add_to_day, get_planner_snapshot, import_maps_urls.",
+      "Trips are one scrollable document grouped by location then day. Columns: Date, Day, Location, Time/Order, Place/Activity, Notes, Category, Google Maps link.",
+      "Use planner_build_trip to create a full trip from scratch (segments + activities + guides). Use planner_create_trip for a simple empty trip, planner_add_segment for another city, planner_add_activity for one row (name, time, location, category, Maps URL), planner_add_to_day for an existing saved place, get_planner_snapshot, import_maps_urls.",
+      "Activity categories: Transportation / Flight, Food & Dining, Sightseeing / Attraction, Coffee & Snacks, Accommodation, Nightlife / Drinks, Guide / Info, Shopping.",
       "When adding places from Maps URLs, include name | city | country if the short link has no coordinates.",
       "Categories include: pizza, burger, sushi, ramen, bagel, museum, landmark, park, and more.",
       "Places are grouped by country and city. CSV format: Name,Description,Latitude,Longitude,Url.",
@@ -1121,20 +1201,45 @@
         return {
           ok: true,
           trips: (state.planner.trips || []).map((t) => ({
-            id: t.id, name: t.name, city: t.city, countryId: t.countryId, dayCount: t.dayCount,
+            id: t.id,
+            name: t.name,
+            dayCount: t.dayCount,
+            startDate: t.startDate,
+            endDate: t.endDate,
+            segments: (t.segments || []).map((s) => ({
+              city: s.city,
+              countryId: s.countryId,
+              startDate: s.startDate,
+              endDate: s.endDate,
+            })),
           })),
         };
       }
       return {
         ok: true,
         trip: {
-          id: trip.id, name: trip.name, city: trip.city, countryId: trip.countryId, dayCount: trip.dayCount,
-          days: (trip.days || []).map((d) => ({
-            day: d.day,
-            slots: Object.fromEntries(
-              Object.entries(d.slots || {}).map(([k, v]) => [k, (v || []).map((e) => ({ name: e.name, note: e.note }))])
-            ),
+          id: trip.id,
+          name: trip.name,
+          dayCount: trip.dayCount,
+          startDate: trip.startDate,
+          endDate: trip.endDate,
+          segments: (trip.segments || []).map((s) => {
+            const country = state.countries.find((c) => c.id === s.countryId);
+            return { city: s.city, country: country?.name || s.countryId, startDate: s.startDate, endDate: s.endDate };
+          }),
+          days: (trip.days || []).map((d, i) => ({
+            day: i + 1,
+            date: d.date,
+            items: WorldPlanner.itemsOf(d).map((item) => ({
+              name: item.name,
+              time: item.time,
+              location: item.importLocation || "",
+              category: item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category),
+              url: item.url || "",
+              notes: item.notes || "",
+            })),
           })),
+          guides: (trip.guides || []).map((g) => ({ title: g.title, city: g.city, body: (g.body || "").slice(0, 240) })),
           suggestions: (trip.suggestions || []).slice(0, 12).map((s) => ({ name: s.name, slot: s.slot, reason: s.reason })),
         },
       };
@@ -1146,13 +1251,80 @@
       if (!countryId) return { ok: false, error: "Country not found" };
       snapshot(`Create trip ${args.city}`);
       const trip = WorldPlanner.createTrip(state, {
-        countryId,
-        city: args.city || "Other",
-        name: args.name,
+        name: args.name || `${args.city} trip`,
         dayCount: Number(args.days) || 3,
+        startDate: args.start_date || null,
+        endDate: args.end_date || null,
+        segments: [{
+          countryId,
+          city: args.city || "Other",
+          startDate: args.start_date || null,
+          endDate: args.end_date || null,
+        }],
       });
+      trip.dayListMode = "timeline";
       persistRefresh(state, { touchPlanner: true });
-      return { ok: true, trip: { id: trip.id, name: trip.name, city: trip.city, dayCount: trip.dayCount } };
+      return {
+        ok: true,
+        trip: {
+          id: trip.id,
+          name: trip.name,
+          dayCount: trip.dayCount,
+          segments: trip.segments.map((s) => ({ city: s.city, countryId: s.countryId })),
+        },
+      };
+    }
+
+    if (name === "planner_build_trip") {
+      const state = api.getState();
+      snapshot(`Build trip ${args.name || "trip"}`);
+      const trip = WorldPlanner.buildTripFromSpec(state, {
+        ...args,
+        day_list_mode: args.timeline === false ? "category" : "timeline",
+      });
+      if (!trip) return { ok: false, error: "Could not build trip" };
+      WorldPlanner.ensurePlanner(state).activeTripId = trip.id;
+      WorldPlanner.ensurePlanner(state).view = "trip";
+      persistRefresh(state, { touchPlanner: true });
+      return {
+        ok: true,
+        trip: {
+          id: trip.id,
+          name: trip.name,
+          dayCount: trip.dayCount,
+          activityCount: (trip.days || []).reduce((n, d) => n + WorldPlanner.itemsOf(d).length, 0),
+        },
+      };
+    }
+
+    if (name === "planner_add_activity") {
+      const state = api.getState();
+      const trip = args.trip_id
+        ? WorldPlanner.ensurePlanner(state).trips.find((t) => t.id === args.trip_id)
+        : WorldPlanner.getActiveTrip(state);
+      if (!trip) return { ok: false, error: "No active trip — create one first" };
+      const dayNum = Number(args.day) || 1;
+      snapshot(`Add activity ${args.name} to day ${dayNum}`);
+      const item = WorldPlanner.addActivityToDay(state, trip.id, dayNum, {
+        name: args.name,
+        time: args.time,
+        notes: args.notes,
+        category: args.category,
+        url: args.url,
+        city: args.city,
+        location: args.location || args.city,
+        countryName: args.country,
+      });
+      if (!item) return { ok: false, error: "Could not add activity" };
+      persistRefresh(state, { touchPlanner: true });
+      return {
+        ok: true,
+        added: item.name,
+        day: dayNum,
+        location: item.importLocation,
+        category: item.importCategoryLabel,
+        url: item.url || "",
+      };
     }
 
     if (name === "planner_add_to_day") {

@@ -150,11 +150,32 @@ window.WorldPlanner = (() => {
   function slotOptions(selected) {
     return SLOTS.map((s) => `<option value="${s.id}" ${s.id === selected ? "selected" : ""}>${s.label}</option>`).join("");
   }
+  const PLANNER_CAT_LABELS = [
+    "Transportation / Flight", "Food & Dining", "Sightseeing / Attraction", "Coffee & Snacks",
+    "Accommodation", "Nightlife / Drinks", "Guide / Info", "Shopping",
+  ];
+
   function catOptions(selected) {
     const labels = PlaceCategorize.allLabels();
     return Object.entries(labels).map(([id, lab]) =>
       `<option value="${esc(id)}" ${id === selected ? "selected" : ""}>${esc(lab)}</option>`
     ).join("");
+  }
+
+  function plannerCatOptions(selectedLabel) {
+    const internal = selectedLabel ? PlaceCategorize.fromPlannerLabel(selectedLabel) : "landmark";
+    const cur = PlaceCategorize.plannerLabel(internal) || selectedLabel || "Sightseeing / Attraction";
+    const labels = [...new Set([...PLANNER_CAT_LABELS, cur].filter(Boolean))];
+    return labels.map((lab) =>
+      `<option value="${esc(lab)}" ${lab === cur ? "selected" : ""}>${esc(lab)}</option>`
+    ).join("");
+  }
+
+  function categoryFromInput(raw) {
+    const n = String(raw || "").trim();
+    if (!n) return { id: "place", label: "" };
+    const id = PlaceCategorize.fromPlannerLabel(n) || (PlaceCategorize.allLabels()[n] ? n : PlaceCategorize.categorize(n, ""));
+    return { id, label: PlaceCategorize.plannerLabel(id) || n };
   }
 
   function ensurePlanner(state) {
@@ -518,6 +539,105 @@ window.WorldPlanner = (() => {
 
   function addPlace(state, tripId, dayNum, slot, place, note = "") {
     return addEntry(state, tripId, dayNum, slot, entryFromPlace(place, slot, note));
+  }
+
+  function addActivityToDay(state, tripId, dayNum, {
+    name, time = "", notes = "", category = "", url = "", city = "", location = "", countryName = "",
+  } = {}) {
+    const trip = ensurePlanner(state).trips.find((t) => t.id === tripId);
+    if (!trip) return null;
+    migrateTrip(trip);
+    const seg = segmentForDay(trip, dayNum);
+    const loc = String(location || city || "").trim() || seg?.city || "Other";
+    const { id: catId, label: catLabel } = categoryFromInput(category || notes || name);
+    let countryId = seg?.countryId || "";
+    let country = countryId ? state.countries.find((c) => c.id === countryId) : null;
+    const hint = countryName || WorldPlannerImport?.locationCountryHint?.(loc, trip.name) || "";
+    if (!country && hint) country = ensureCountry(state, hint);
+    if (!countryId && country) countryId = country.id;
+    const placeName = String(name || "").trim();
+    const place = placeName
+      ? upsertPlaceFromItem(state, {
+        name: placeName,
+        city: loc,
+        countryId,
+        countryName: country?.name || hint,
+        category: catId,
+        url,
+        notes,
+      })
+      : null;
+    const item = {
+      id: WorldStore.uid("item"),
+      time: String(time || "").trim(),
+      name: placeName || "—",
+      notes: String(notes || "").trim(),
+      category: catId,
+      url: url || place?.url || "",
+      placeId: place?.id || "",
+      slot: PlaceCategorize.defaultSlot(catId),
+      lat: place?.lat,
+      lng: place?.lng,
+      importLocation: loc,
+      importCategoryLabel: catLabel,
+      placeholder: !placeName,
+    };
+    addItem(trip, dayNum, item);
+    trip.updatedAt = new Date().toISOString();
+    return item;
+  }
+
+  function buildTripFromSpec(state, spec = {}) {
+    const segmentsIn = Array.isArray(spec.segments) && spec.segments.length ? spec.segments : [{
+      country: spec.country,
+      city: spec.city,
+      start_date: spec.start_date,
+      end_date: spec.end_date,
+    }];
+    const segs = [];
+    for (const raw of segmentsIn) {
+      const city = String(raw.city || spec.city || "Other").trim() || "Other";
+      const countryName = String(raw.country || spec.country || "").trim();
+      let country = countryName ? findCountry(state, countryName) : null;
+      if (!country && countryName) country = ensureCountry(state, countryName);
+      segs.push({
+        countryId: country?.id || "",
+        city,
+        startDate: raw.start_date || raw.startDate || spec.start_date || null,
+        endDate: raw.end_date || raw.endDate || spec.end_date || null,
+      });
+    }
+    const trip = createTrip(state, {
+      name: spec.name || spec.title || "My trip",
+      startDate: spec.start_date || spec.startDate || segs[0]?.startDate || null,
+      endDate: spec.end_date || spec.endDate || segs[segs.length - 1]?.endDate || null,
+      segments: segs,
+      dayCount: Number(spec.days || spec.day_count) || undefined,
+      guides: (spec.guides || []).map((g) => ({
+        title: g.title || "Getting around",
+        body: g.body || "",
+        city: g.city || "",
+      })),
+    });
+    const activities = spec.activities || spec.rows || [];
+    for (const row of activities) {
+      const dayNum = Number(row.day) || 1;
+      addActivityToDay(state, trip.id, dayNum, {
+        name: row.name || row.place,
+        time: row.time,
+        notes: row.notes,
+        category: row.category,
+        url: row.url,
+        city: row.city || row.location,
+        location: row.location || row.city,
+        countryName: row.country,
+      });
+      const day = trip.days?.[dayNum - 1];
+      if (day && row.date) day.date = row.date;
+    }
+    if (spec.day_list_mode) trip.dayListMode = spec.day_list_mode;
+    else if (spec.timeline !== false) trip.dayListMode = "timeline";
+    return trip;
   }
 
   function removeItem(trip, dayNum, itemId) {
@@ -1226,8 +1346,8 @@ window.WorldPlanner = (() => {
       <div class="planner-trip-nav card">
         <button type="button" class="btn btn-ghost btn-sm" data-act="trips-back" onclick="WorldPlanner.act(event)">← Trips</button>
         <div class="planner-trip-nav-meta">
-          <strong>${esc(trip.name)}</strong>
-          <span class="muted">${esc(formatTripDates(trip))}</span>
+          <input id="trip-name-edit" class="trip-name-input trip-nav-name" value="${esc(trip.name)}" aria-label="Trip name" />
+          <span class="muted">${trip.dayCount || 0} days · ${esc(formatTripDates(trip))}</span>
         </div>
         <button type="button" class="btn btn-ghost btn-sm trip-nav-del" data-act="delete-trip" data-trip-id="${esc(trip.id)}" onclick="WorldPlanner.act(event)">Delete</button>
       </div>`;
@@ -1507,15 +1627,17 @@ window.WorldPlanner = (() => {
     </article>`;
   }
 
-  function renderDayAddForm(day) {
+  function renderDayAddForm(day, seg) {
+    const city = seg?.city && seg.city !== "Other" ? seg.city : "";
     return `<div class="day-add card">
       <strong>Add activity</strong>
       <div class="day-add-grid">
-        <input class="pill-select add-item-time" data-day="${day.day}" placeholder="Time" />
+        <input class="pill-select add-item-time" data-day="${day.day}" placeholder="Time" inputmode="numeric" />
         <input class="pill-select add-item-name" data-day="${day.day}" placeholder="Place / activity" />
+        <input class="pill-select add-item-location" data-day="${day.day}" placeholder="Location / city" value="${esc(city)}" />
+        <select class="pill-select add-item-cat" data-day="${day.day}">${plannerCatOptions("Sightseeing / Attraction")}</select>
+        <input class="pill-select add-item-url" data-day="${day.day}" placeholder="Google Maps URL (paste link)" inputmode="url" />
         <input class="pill-select add-item-notes" data-day="${day.day}" placeholder="Notes" />
-        <select class="pill-select add-item-cat" data-day="${day.day}">${catOptions("landmark")}</select>
-        <input class="pill-select add-item-url" data-day="${day.day}" placeholder="Maps URL (optional)" />
         <button type="button" class="btn btn-secondary" data-act="add-item" data-day="${day.day}">+ Add to day</button>
       </div>
     </div>`;
@@ -1541,29 +1663,6 @@ window.WorldPlanner = (() => {
           <p class="day-page-kicker">Day ${dayNum} of ${total}${day.importDay && day.importDay !== dayNum ? ` <span class="muted">(itinerary day ${esc(String(day.importDay))})</span>` : ""}</p>
           <h2 class="day-page-title">${esc(headline)}</h2>
         </header>
-        <nav class="day-nav-bar" aria-label="Day navigation">
-          <button type="button" class="btn btn-ghost btn-sm day-nav-arrow" data-act="day-prev" ${dayNum <= 1 ? "disabled" : ""}>←</button>
-          <label class="day-jump-field">
-            <span class="sr-only">Jump to day</span>
-            <select class="pill-select day-jump-select" id="day-jump-select" data-act="day-select">
-              ${(trip.days || []).map((d, i) => {
-                const n = i + 1;
-                const seg = segmentForDay(trip, n);
-                const country = state.countries.find((c) => c.id === seg?.countryId);
-                const cities = [...new Set(itemsOf(d).map((it) => it.importLocation).filter((c) => c && c !== "Other"))];
-                const cityLabel = cities.length ? cities.join(" · ") : (seg?.city && seg.city !== "Other" ? seg.city : "");
-                const label = [
-                  `Day ${n}`,
-                  d.date ? fmtDate(d.date) : "",
-                  cityLabel,
-                  country?.name || "",
-                ].filter(Boolean).join(" · ");
-                return `<option value="${n}" ${n === dayNum ? "selected" : ""}>${esc(label)}</option>`;
-              }).join("")}
-            </select>
-          </label>
-          <button type="button" class="btn btn-ghost btn-sm day-nav-arrow" data-act="day-next" ${dayNum >= total ? "disabled" : ""}>→</button>
-        </nav>
         <div class="day-nav-chips" role="tablist" aria-label="Day chips">
           ${(trip.days || []).map((d, i) => {
             const n = i + 1;
@@ -1585,7 +1684,7 @@ window.WorldPlanner = (() => {
         <div class="day-sections">
           ${renderDayActivities(state, trip, day, dayNum)}
         </div>
-        ${renderDayAddForm(day)}
+        ${renderDayAddForm(day, seg)}
       </section>`;
   }
 
@@ -1632,10 +1731,6 @@ window.WorldPlanner = (() => {
     trip.activeDayNum = activeDayNum;
     return `
       <article class="planner-trip-doc" id="planner-trip-doc">
-        <header class="trip-doc-head card">
-          <input id="trip-name-edit" class="trip-name-input" value="${esc(trip.name)}" />
-          <p class="muted">${trip.dayCount || 0} days · ${esc(formatTripDates(trip))}</p>
-        </header>
         ${renderDayPage(state, trip, activeDayNum)}
         <details class="route-editor card" ${routeEditorOpen ? "open" : ""}>
           <summary class="route-editor-summary">Edit locations &amp; dates</summary>
@@ -1942,21 +2037,14 @@ window.WorldPlanner = (() => {
       const dayNum = Number(actEl.dataset.day);
       const wrap = actEl.closest(".day-add") || actEl.closest(".itin-day");
       const name = wrap?.querySelector(".add-item-name")?.value?.trim();
-      if (!name) return WorldApp.toast("Enter a place name", "warn");
-      const time = wrap.querySelector(".add-item-time")?.value?.trim() || "";
-      const notes = wrap.querySelector(".add-item-notes")?.value?.trim() || "";
-      const category = wrap.querySelector(".add-item-cat")?.value || "place";
-      const url = wrap.querySelector(".add-item-url")?.value?.trim() || "";
-      const seg = segmentForDay(trip, dayNum);
-      const country = state.countries.find((c) => c.id === seg?.countryId);
-      const place = upsertPlaceFromItem(state, {
-        name, city: seg?.city, countryId: seg?.countryId, countryName: country?.name, category, url, notes,
-      });
-      addItem(trip, dayNum, {
-        id: WorldStore.uid("item"), time, name, notes, category, url: url || place?.url || "",
-        placeId: place?.id || "", slot: PlaceCategorize.defaultSlot(category), lat: place?.lat, lng: place?.lng,
-      });
-      persistLive({ toast: `Added ${name}`, scroll: "#planner-day-page" });
+      const time = wrap?.querySelector(".add-item-time")?.value?.trim() || "";
+      const notes = wrap?.querySelector(".add-item-notes")?.value?.trim() || "";
+      const category = wrap?.querySelector(".add-item-cat")?.value || "";
+      const url = wrap?.querySelector(".add-item-url")?.value?.trim() || "";
+      const location = wrap?.querySelector(".add-item-location")?.value?.trim() || "";
+      if (!name && !location) return;
+      addActivityToDay(state, trip.id, dayNum, { name, time, notes, category, url, location });
+      persistLive({ scroll: "#planner-day-page" });
       return;
     }
     if (act === "pin-globe") {
@@ -2021,10 +2109,6 @@ window.WorldPlanner = (() => {
       return;
     }
     if (el.id === "planner-import-file") return;
-
-    if (el.id === "day-jump-select") {
-      return goToDay(Number(el.value), { persist: true });
-    }
 
     const act = el.dataset.act;
     if (act === "seg-field") {
@@ -2483,5 +2567,6 @@ window.WorldPlanner = (() => {
     segmentForDay, placesForDay, localSuggestDay, aiSuggestDay,
     adoptSuggestion, showAddToTripMenu: showAddToTripModal, showAddToTripModal, rebuildDays,
     exportTripSpreadsheet, downloadTripExcel, importDraft, itemsOf,
+    addActivityToDay, buildTripFromSpec, categoryFromInput,
   };
 })();

@@ -15,6 +15,8 @@ Interactive **3D travel globe** with Google Maps saved places, fine-grained cate
   - Trip list (open / delete with confirm) and inner day page (← Trips, delete trip)
   - Each day: **Categories** or **Timeline** (PDF order; press the 3 dotted lines to drag-reorder)
   - Activity rows: left grip, tap name to copy, **Maps**, **ⓘ**, and **✕** (delete with confirm)
+  - **Add activity**: time, place, location, category, Maps URL, notes — saved to trip and globe
+  - Editable trip name in the top nav only (no duplicate title card); day chips without arrow/dropdown row
   - **Map this day on globe** — globe pins + country panel of that day’s places
 - **Import itinerary** — Excel / PDF / CSV / ZIP; after import, a popup lists locations and **each new place** (city, country, category, link)
 - **Import places** — Google Takeout ZIP, My Maps CSV, or Maps URLs (`Name | City | Country | URL`)

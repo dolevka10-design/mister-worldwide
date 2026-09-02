@@ -18,14 +18,8 @@ window.WorldApp = (() => {
 
   const $ = (id) => document.getElementById(id);
 
-  function toast(msg, type = "info") {
-    const el = $("toast");
-    if (!el) return;
-    el.textContent = msg;
-    el.className = `toast toast-${type} show`;
-    el.setAttribute("aria-live", "polite");
-    clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.remove("show"), type === "error" ? 4200 : 2800);
+  function toast() {
+    /* Status toasts removed — they stayed visible on mobile and cluttered the globe/planner. */
   }
 
   function persist(opts = {}) {

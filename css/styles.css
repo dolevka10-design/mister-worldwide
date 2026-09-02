@@ -1048,6 +1048,17 @@ input[type="date"]::-webkit-date-and-time-value {
 }
 .planner-trip-nav-meta { min-width: 0; flex: 1; }
 .planner-trip-nav-meta strong { display: block; }
+.trip-nav-name {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  margin: 0 0 0.1rem;
+}
+.trip-nav-name:focus { outline: none; box-shadow: 0 1px 0 var(--accent); }
 .trip-nav-del { flex-shrink: 0; color: #ffb4b4; }
 .sr-only {
   position: absolute;
@@ -1656,24 +1667,7 @@ body.assist-open .assist-fab { visibility: hidden; pointer-events: none; }
   .assist-form input { font-size: inherit; }
 }
 
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%) translateY(120%);
-  background: var(--card);
-  border: 1px solid var(--border);
-  padding: 0.65rem 1rem;
-  border-radius: 999px;
-  z-index: 50;
-  transition: transform 0.25s;
-  font-size: 0.82rem;
-  max-width: calc(100vw - 2rem);
-  pointer-events: none;
-}
-.toast.show { transform: translateX(-50%) translateY(0); }
-.toast-error { border-color: var(--danger); color: #ffb4bc; }
-.toast-warn { border-color: #c9a227; color: #ffe9a8; }
+.toast { display: none !important; }
 
 .assist-fab.open { background: var(--card); }
 
