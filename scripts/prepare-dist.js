@@ -6,6 +6,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
 const root = path.join(__dirname, "..");
 const out = path.join(root, "dist");
@@ -13,6 +14,7 @@ const out = path.join(root, "dist");
 const COPY_DIRS = ["css", "js", "assets"];
 const COPY_FILES = ["index.html"];
 const DATA_FILES = ["places.json"];
+const VERSION_TOKEN = "%%MW_BUILD%%";
 
 function rmrf(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
@@ -26,6 +28,33 @@ function cpDir(src, dest) {
     if (entry.isDirectory()) cpDir(from, to);
     else fs.copyFileSync(from, to);
   }
+}
+
+function buildVersion() {
+  if (process.env.APP_VERSION) return String(process.env.APP_VERSION).trim();
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8", cwd: root }).trim();
+  } catch {
+    return String(Date.now());
+  }
+}
+
+function injectVersion(filePath, version) {
+  const html = fs.readFileSync(filePath, "utf8");
+  fs.writeFileSync(filePath, html.split(VERSION_TOKEN).join(version));
+}
+
+function writeHeaders(dir) {
+  const headers = [
+    "# Always fetch fresh HTML so iOS/Safari picks up new JS/CSS query strings",
+    "/",
+    "  Cache-Control: no-cache, must-revalidate",
+    "",
+    "/index.html",
+    "  Cache-Control: no-cache, must-revalidate",
+    "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "_headers"), headers);
 }
 
 rmrf(out);
@@ -47,5 +76,8 @@ for (const file of DATA_FILES) {
   if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dataOut, file));
 }
 
-const stats = fs.statSync(out);
-console.log(`Prepared dist/ for deploy (${COPY_FILES.length} html, ${COPY_DIRS.length} asset dirs, data/places.json)`);
+const version = buildVersion();
+injectVersion(path.join(out, "index.html"), version);
+writeHeaders(out);
+
+console.log(`Prepared dist/ for deploy (version ${version})`);

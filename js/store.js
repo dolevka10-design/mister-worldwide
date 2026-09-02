@@ -203,7 +203,9 @@ window.WorldStore = (() => {
   }
 
   async function loadSeed() {
-    const res = await fetch("data/places.json");
+    const v = window.__APP_VERSION__ || "";
+    const url = v ? `data/places.json?v=${encodeURIComponent(v)}` : "data/places.json";
+    const res = await fetch(url);
     if (!res.ok) throw new Error("Failed to load places.json");
     seed = await res.json();
     return seed;
