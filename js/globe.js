@@ -243,8 +243,9 @@ window.WorldGlobe = (() => {
     const controls = globe?.controls();
     if (!controls || !pov) return;
     const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
-    controls.rotateSpeed = Math.max(0.1, Math.min(0.38, alt * 0.16));
-    controls.zoomSpeed = Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
+    const close = alt < 0.75;
+    controls.rotateSpeed = close ? 0.1 : Math.max(0.1, Math.min(0.38, alt * 0.16));
+    controls.zoomSpeed = close ? 0.05 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
   }
 
   function enforcePovLimits(pov = globe?.pointOfView?.()) {
@@ -705,7 +706,7 @@ window.WorldGlobe = (() => {
     controls.enablePan = false;
     controls.enableRotate = true;
     controls.enableDamping = true;
-    controls.dampingFactor = 0.14;
+    controls.dampingFactor = 0.16;
     controls.minDistance = globeR * (1 + MIN_POV_ALT);
     controls.maxDistance = globeR * (1 + MAX_POV_ALT);
     const pov = globe.pointOfView?.() || DEFAULT_POV;
