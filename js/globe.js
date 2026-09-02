@@ -28,7 +28,7 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const MIN_POV_ALT = 0.19;
+  const MIN_POV_ALT = 0.038;
   const MAX_POV_ALT = 3.2;
   const ALT_DISPLAY_FAR = 2.5;
   const ZOOM_MIN = 1;
@@ -208,19 +208,28 @@ window.WorldGlobe = (() => {
 
   function setZoomBarVisible(visible) {
     if (!zoomBarEl) return;
+    const pov = globe?.pointOfView?.();
+    const alt = pov?.altitude ?? DEFAULT_POV.altitude;
+    const keepForDepth = tilesActive || alt < TILE_OFF_ALT + 0.12;
+    if (!visible && keepForDepth) {
+      updateZoomHud(pov);
+      zoomBarEl.classList.add("is-visible");
+      return;
+    }
     zoomBarEl.classList.toggle("is-visible", !!visible);
     clearTimeout(zoomHudHideTimer);
     if (visible) return;
     zoomHudHideTimer = setTimeout(() => {
+      if (tilesActive || (globe?.pointOfView?.().altitude ?? DEFAULT_POV.altitude) < TILE_OFF_ALT + 0.12) return;
       zoomBarEl?.classList.remove("is-visible");
     }, 900);
   }
 
   function noteZoomInteraction(pov) {
     if (!pov || !Number.isFinite(pov.altitude)) return;
-    const altChanged = lastHudAlt == null || Math.abs(pov.altitude - lastHudAlt) > 0.006;
+    const altChanged = lastHudAlt == null || Math.abs(pov.altitude - lastHudAlt) > 0.002;
     lastHudAlt = pov.altitude;
-    if (altChanged) {
+    if (altChanged || tilesActive || pov.altitude < TILE_OFF_ALT) {
       setZoomBarVisible(true);
       updateZoomHud(pov);
     }
@@ -242,8 +251,9 @@ window.WorldGlobe = (() => {
     if (!controls || !pov) return;
     const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
     const close = alt < TILE_OFF_ALT;
-    controls.rotateSpeed = close ? 0.08 : Math.max(0.1, Math.min(0.38, alt * 0.16));
-    controls.zoomSpeed = close ? 0.04 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
+    const extreme = alt < 0.12;
+    controls.rotateSpeed = extreme ? 0.05 : close ? 0.08 : Math.max(0.1, Math.min(0.38, alt * 0.16));
+    controls.zoomSpeed = extreme ? 0.02 : close ? 0.04 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
   }
 
   function enforcePovLimits(pov = globe?.pointOfView?.()) {
@@ -293,11 +303,14 @@ window.WorldGlobe = (() => {
     }
     tilesActive = false;
     tileMaxLevel = 0;
+    updateZoomHud();
+    setZoomBarVisible(true);
   }
 
   function enableZoomTiles(level, alt) {
     if (!globe) return;
     const nextLevel = Math.max(7, level || 7);
+    const wasActive = tilesActive;
     try {
       applyTileCurvature(alt);
       if (!tilesActive) {
@@ -305,14 +318,16 @@ window.WorldGlobe = (() => {
         globe.globeTileEngineUrl(tileUrlFor);
         tilesActive = true;
         tileMaxLevel = nextLevel;
-        return;
-      }
-      if (nextLevel !== tileMaxLevel) {
+      } else if (nextLevel !== tileMaxLevel) {
         globe.globeTileEngineMaxLevel(nextLevel);
         tileMaxLevel = nextLevel;
       }
     } catch (e) {
       console.warn("Enable globe tiles failed", e);
+    }
+    if (!wasActive && tilesActive) {
+      updateZoomHud();
+      setZoomBarVisible(true);
     }
   }
 
@@ -497,6 +512,21 @@ window.WorldGlobe = (() => {
     return null;
   }
 
+  function bindPinTap(el, onTap) {
+    el.addEventListener(
+      "pointerdown",
+      (e) => {
+        e.stopPropagation();
+      },
+      true
+    );
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onTap();
+    });
+  }
+
   function makeFlagPin(d) {
     const el = document.createElement("button");
     el.type = "button";
@@ -507,6 +537,7 @@ window.WorldGlobe = (() => {
     el.innerHTML = `
       <img src="${CountryMeta.flagUrl(d.iso, 40)}" alt="" width="32" height="24" loading="lazy" draggable="false"/>
       <span class="globe-flag-count">${d.placeCount}</span>`;
+    bindPinTap(el, () => selectCountry(d.id));
     return el;
   }
 
@@ -525,6 +556,7 @@ window.WorldGlobe = (() => {
         <span class="globe-city-label">${shortCity}</span>
         <span class="globe-city-count">${d.placeCount}</span>
       </span>`;
+    bindPinTap(el, () => selectCity(d.countryId, d.city));
     return el;
   }
 
@@ -719,7 +751,9 @@ window.WorldGlobe = (() => {
         syncZoomTiles();
         enforcePovLimits();
         updateZoomHud();
-        setZoomBarVisible(false);
+        if ((globe.pointOfView?.().altitude ?? DEFAULT_POV.altitude) >= TILE_OFF_ALT + 0.12 && !tilesActive) {
+          setZoomBarVisible(false);
+        }
       }, 60);
     });
     controls.addEventListener("change", () => {
