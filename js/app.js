@@ -224,6 +224,50 @@ window.WorldApp = (() => {
     placeIdOrder = [];
   }
 
+  function cityPinsForCountry(countryId) {
+    const places = WorldStore.placesByCountry(state, countryId);
+    const groups = new Map();
+    for (const p of places) {
+      const city = String(p.city || "").trim();
+      if (!city || city === "Other") continue;
+      if (!groups.has(city)) groups.set(city, []);
+      groups.get(city).push(p);
+    }
+    const pins = [];
+    for (const [city, items] of groups) {
+      const located = items.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+      if (!located.length) continue;
+      const lat = located.reduce((s, p) => s + p.lat, 0) / located.length;
+      const lng = located.reduce((s, p) => s + p.lng, 0) / located.length;
+      pins.push({ city, countryId, lat, lng, placeCount: items.length });
+    }
+    return pins;
+  }
+
+  function selectCityInCountry(countryId, city) {
+    if (!countryId || !city) return;
+    clearDayPlaceFilter();
+    selectedCountry = countryId;
+    filterCategory = "";
+    filterQuery = "";
+    filterCity = city;
+    tripDayFilter = "";
+    tripCityFilter = "";
+    tripActivityCategoryFilter = "";
+    viewMode = "list";
+    setActiveViewTab("view-list");
+    const q = $("place-search");
+    if (q) q.value = "";
+    const citySel = $("city-filter");
+    if (citySel) citySel.value = city;
+    const pin = cityPinsForCountry(countryId).find((p) => p.city === city);
+    if (pin) WorldGlobe.focusCity?.(pin.lat, pin.lng);
+    else WorldGlobe.focusCountry(countryId);
+    renderCountryList();
+    renderCountryPanel();
+    $("country-panel")?.classList.add("open");
+  }
+
   function selectCountry(countryId, { keepDayFilter = false } = {}) {
     if (!keepDayFilter) clearDayPlaceFilter();
     selectedCountry = countryId;
@@ -240,7 +284,6 @@ window.WorldApp = (() => {
     const citySel = $("city-filter");
     if (citySel) citySel.value = "";
     WorldGlobe.focusCountry(countryId);
-    WorldGlobe.setPinsVisible?.(false);
     renderCountryList();
     renderCountryPanel();
     $("country-panel")?.classList.add("open");
@@ -461,8 +504,8 @@ window.WorldApp = (() => {
       $("country-panel")?.classList.remove("open");
       selectedCountry = null;
       clearDayPlaceFilter();
+      filterCity = "";
       WorldGlobe.restoreCountryPins?.();
-      WorldGlobe.setPinsVisible?.(true);
       renderCountryList();
     });
 
@@ -681,6 +724,8 @@ window.WorldApp = (() => {
         await WorldGlobe.init(el, {
           countries: countriesForUi(state),
           onCountryClick: selectCountry,
+          onCityClick: selectCityInCountry,
+          getCityPinsForCountry: cityPinsForCountry,
         });
         ready = true;
       } else {
@@ -847,7 +892,7 @@ window.WorldApp = (() => {
   return {
     start, ready: () => ready, getState, setState, cloneState, persist, persistNav, persistPlanner, refresh, toast,
     getUser: () => user,
-    selectCountry, showDayPlacesOnCountry, get selectedCountry() { return selectedCountry; },
+    selectCountry, selectCityInCountry, showDayPlacesOnCountry, get selectedCountry() { return selectedCountry; },
   };
 })();
 

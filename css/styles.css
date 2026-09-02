@@ -287,6 +287,12 @@ html, body {
   position: relative;
   z-index: 8;
 }
+.globe-canvas.globe-ready .globe-city-pin {
+  pointer-events: auto;
+  touch-action: manipulation;
+  position: relative;
+  z-index: 8;
+}
 
 .globe-flag-pin {
   display: flex;
@@ -327,6 +333,61 @@ html, body {
 
 .globe-flag-pin img { width: 24px; height: 18px; }
 .globe-flag-count { font-size: 0.55rem; }
+
+.globe-city-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.12rem;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  padding: 0.2rem 0.35rem;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  transform: translate(-50%, -100%);
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
+  transition: transform 0.15s ease;
+  max-width: 7.5rem;
+}
+.globe-city-pin:hover {
+  transform: translate(-50%, -100%) scale(1.08);
+  z-index: 9;
+}
+.globe-city-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(5, 5, 8, 0.9);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.12rem 0.35rem;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 7.5rem;
+}
+.globe-city-count {
+  font-size: 0.55rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(5, 5, 8, 0.88);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.02rem 0.3rem;
+  line-height: 1.2;
+}
+html[data-theme="light"] .globe-city-label {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.95);
+}
+html[data-theme="light"] .globe-city-count {
+  background: rgba(255, 255, 255, 0.95);
+}
+
 .globe-toolbar { top: 0.4rem; right: 0.4rem; }
 .globe-rotate-btn { font-size: 0.72rem; padding: 0.28rem 0.5rem; }
 
