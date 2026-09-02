@@ -387,13 +387,26 @@ html, body {
   transform: translateX(-50%) translateY(0);
 }
 .globe-zoom-bar-track {
+  position: relative;
   width: 100%;
   height: 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
   overflow: hidden;
 }
+.globe-zoom-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(124, 240, 255, 0.5);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 1;
+}
 .globe-zoom-bar-fill {
+  position: relative;
+  z-index: 2;
   height: 100%;
   width: 0%;
   border-radius: inherit;

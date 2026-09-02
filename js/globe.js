@@ -28,15 +28,23 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const MIN_POV_ALT = 0.038;
+  const MIN_POV_ALT = 0.027;
   const MAX_POV_ALT = 3.2;
   const ALT_DISPLAY_FAR = 2.5;
-  const ZOOM_MIN = 1;
-  const ZOOM_MAX = 40;
-  // Fixed physical altitudes — stamped from former HUD zoom 38 before 2x max zoom
+  // Fixed physical altitudes — stamped hi-res entry / exit (independent of HUD % scale)
   const TILE_ON_ALT = 0.489;
   const TILE_OFF_ALT = 0.58;
   const TILE_MIN_ALT = MIN_POV_ALT;
+  const HI_RES_TIERS = [
+    { minPct: 81, level: 10, curvature: 5, label: "Satellite" },
+    { minPct: 84, level: 10, curvature: 4, label: "Satellite" },
+    { minPct: 87, level: 11, curvature: 4, label: "Satellite+" },
+    { minPct: 90, level: 12, curvature: 3, label: "Hi-res" },
+    { minPct: 93, level: 12, curvature: 3, label: "Hi-res" },
+    { minPct: 95, level: 13, curvature: 3, label: "Hi-res+" },
+    { minPct: 97, level: 14, curvature: 3, label: "Detail" },
+    { minPct: 99, level: 15, curvature: 2, label: "Max detail" },
+  ];
 
   let lastSelectAt = 0;
   let cityPinRefreshTimer = null;
@@ -176,26 +184,30 @@ window.WorldGlobe = (() => {
     return EARTH_TILE_URL.replace("{x}", x).replace("{y}", y).replace("{l}", l);
   }
 
-  function smoothstep(t) {
-    const x = Math.max(0, Math.min(1, t));
-    return x * x * (3 - 2 * x);
+  function zoomPercent(alt) {
+    if (!Number.isFinite(alt)) return 0;
+    const clamped = Math.max(MIN_POV_ALT, Math.min(ALT_DISPLAY_FAR, alt));
+    return Math.round(((ALT_DISPLAY_FAR - clamped) / (ALT_DISPLAY_FAR - MIN_POV_ALT)) * 100);
   }
 
-  function zoomLevelToAltitude(level) {
-    const t = (level - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN);
+  function altitudeForPercent(pct) {
+    const t = Math.max(0, Math.min(100, pct)) / 100;
     return ALT_DISPLAY_FAR - t * (ALT_DISPLAY_FAR - MIN_POV_ALT);
   }
 
-  function altitudeToZoomLevel(alt) {
-    if (!Number.isFinite(alt)) return ZOOM_MIN;
-    const clamped = Math.max(MIN_POV_ALT, Math.min(ALT_DISPLAY_FAR, alt));
-    const t = (ALT_DISPLAY_FAR - clamped) / (ALT_DISPLAY_FAR - MIN_POV_ALT);
-    return Math.round(ZOOM_MIN + t * (ZOOM_MAX - ZOOM_MIN));
+  const TILE_ON_PCT = zoomPercent(TILE_ON_ALT);
+  const TILE_OFF_PCT = zoomPercent(TILE_OFF_ALT);
+
+  function qualityTierForPercent(pct) {
+    let tier = null;
+    for (const step of HI_RES_TIERS) {
+      if (pct >= step.minPct) tier = step;
+    }
+    return tier;
   }
 
-  function zoomLevelProgress(alt) {
-    const level = altitudeToZoomLevel(alt);
-    return (level - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN);
+  function qualityTierForAltitude(alt) {
+    return qualityTierForPercent(zoomPercent(alt));
   }
 
   function bindZoomHud() {
@@ -203,14 +215,28 @@ window.WorldGlobe = (() => {
     zoomLevelEl = document.getElementById("globe-zoom-level");
     zoomModeEl = document.getElementById("globe-zoom-mode");
     zoomFillEl = document.getElementById("globe-zoom-bar-fill");
+    renderZoomTicks();
     setZoomBarVisible(false);
+  }
+
+  function renderZoomTicks() {
+    const track = document.querySelector(".globe-zoom-bar-track");
+    if (!track || track._ticksBound) return;
+    track._ticksBound = true;
+    for (const tier of HI_RES_TIERS) {
+      const tick = document.createElement("span");
+      tick.className = "globe-zoom-tick";
+      tick.style.left = `${tier.minPct}%`;
+      tick.title = `${tier.minPct}% · ${tier.label}`;
+      track.appendChild(tick);
+    }
   }
 
   function setZoomBarVisible(visible) {
     if (!zoomBarEl) return;
     const pov = globe?.pointOfView?.();
     const alt = pov?.altitude ?? DEFAULT_POV.altitude;
-    const keepForDepth = tilesActive || alt < TILE_OFF_ALT + 0.12;
+    const keepForDepth = tilesActive || zoomPercent(alt) >= TILE_OFF_PCT;
     if (!visible && keepForDepth) {
       updateZoomHud(pov);
       zoomBarEl.classList.add("is-visible");
@@ -220,7 +246,7 @@ window.WorldGlobe = (() => {
     clearTimeout(zoomHudHideTimer);
     if (visible) return;
     zoomHudHideTimer = setTimeout(() => {
-      if (tilesActive || (globe?.pointOfView?.().altitude ?? DEFAULT_POV.altitude) < TILE_OFF_ALT + 0.12) return;
+      if (tilesActive || zoomPercent(globe?.pointOfView?.().altitude ?? DEFAULT_POV.altitude) >= TILE_OFF_PCT) return;
       zoomBarEl?.classList.remove("is-visible");
     }, 900);
   }
@@ -229,7 +255,7 @@ window.WorldGlobe = (() => {
     if (!pov || !Number.isFinite(pov.altitude)) return;
     const altChanged = lastHudAlt == null || Math.abs(pov.altitude - lastHudAlt) > 0.002;
     lastHudAlt = pov.altitude;
-    if (altChanged || tilesActive || pov.altitude < TILE_OFF_ALT) {
+    if (altChanged || tilesActive || zoomPercent(pov.altitude) >= TILE_OFF_PCT) {
       setZoomBarVisible(true);
       updateZoomHud(pov);
     }
@@ -238,12 +264,18 @@ window.WorldGlobe = (() => {
   function updateZoomHud(pov = globe?.pointOfView?.()) {
     if (!zoomLevelEl || !zoomModeEl || !zoomFillEl) return;
     const alt = Number.isFinite(pov?.altitude) ? pov.altitude : DEFAULT_POV.altitude;
-    const level = altitudeToZoomLevel(alt);
-    zoomLevelEl.textContent = String(level);
-    zoomFillEl.style.width = `${Math.round(zoomLevelProgress(alt) * 100)}%`;
-    const hires = tilesActive || alt < TILE_ON_ALT;
-    zoomModeEl.textContent = hires ? "Hi-res satellite" : "Standard globe";
-    zoomModeEl.classList.toggle("is-hires", hires);
+    const pct = zoomPercent(alt);
+    zoomLevelEl.textContent = `${pct}%`;
+    zoomFillEl.style.width = `${pct}%`;
+    const tier = qualityTierForPercent(pct);
+    const hires = tilesActive || pct >= TILE_ON_PCT;
+    if (!hires) {
+      zoomModeEl.textContent = "Standard globe";
+      zoomModeEl.classList.remove("is-hires");
+      return;
+    }
+    zoomModeEl.textContent = tier?.label || "Hi-res satellite";
+    zoomModeEl.classList.add("is-hires");
   }
 
   function syncControlSpeeds(pov) {
@@ -251,7 +283,7 @@ window.WorldGlobe = (() => {
     if (!controls || !pov) return;
     const alt = Math.max(MIN_POV_ALT, pov.altitude || DEFAULT_POV.altitude);
     const close = alt < TILE_OFF_ALT;
-    const extreme = alt < 0.12;
+    const extreme = alt < 0.09;
     controls.rotateSpeed = extreme ? 0.05 : close ? 0.08 : Math.max(0.1, Math.min(0.38, alt * 0.16));
     controls.zoomSpeed = extreme ? 0.02 : close ? 0.04 : Math.max(0.06, Math.min(0.28, (alt + 0.25) * 0.1));
   }
@@ -268,19 +300,17 @@ window.WorldGlobe = (() => {
 
   function maxTileLevelForAltitude(alt) {
     if (!Number.isFinite(alt)) return 0;
-    if (tilesActive ? alt >= TILE_OFF_ALT : alt >= TILE_ON_ALT) return 0;
-    const mobile = isMobileViewport();
-    const cap = mobile ? 12 : 14;
-    const minLevel = 10;
-    const t = smoothstep((TILE_ON_ALT - alt) / (TILE_ON_ALT - TILE_MIN_ALT));
-    return Math.round(minLevel + t * (cap - minLevel));
+    const pct = zoomPercent(alt);
+    if (tilesActive ? pct < TILE_OFF_PCT : pct < TILE_ON_PCT) return 0;
+    const tier = qualityTierForPercent(pct);
+    if (!tier) return isMobileViewport() ? 10 : 10;
+    return isMobileViewport() ? Math.min(tier.level, 13) : tier.level;
   }
 
   function tileCurvatureForAltitude(alt) {
-    if (!Number.isFinite(alt) || alt >= TILE_OFF_ALT) return 5;
-    if (alt <= 1.0) return 3;
-    if (alt <= 1.12) return 4;
-    return 5;
+    if (!Number.isFinite(alt) || zoomPercent(alt) < TILE_OFF_PCT) return 5;
+    const tier = qualityTierForAltitude(alt);
+    return tier?.curvature ?? 5;
   }
 
   function applyTileCurvature(alt) {
@@ -751,7 +781,7 @@ window.WorldGlobe = (() => {
         syncZoomTiles();
         enforcePovLimits();
         updateZoomHud();
-        if ((globe.pointOfView?.().altitude ?? DEFAULT_POV.altitude) >= TILE_OFF_ALT + 0.12 && !tilesActive) {
+        if (zoomPercent(globe.pointOfView?.().altitude ?? DEFAULT_POV.altitude) < TILE_OFF_PCT && !tilesActive) {
           setZoomBarVisible(false);
         }
       }, 60);
