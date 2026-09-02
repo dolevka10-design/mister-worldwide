@@ -28,7 +28,7 @@ window.WorldGlobe = (() => {
   const MAX_CITY_PINS = 120;
   const CITY_PIN_MIN_PLACES = 2;
   const DEFAULT_POV = { lat: 18, lng: 0, altitude: 2.35 };
-  const MIN_POV_ALT = 0.62;
+  const MIN_POV_ALT = 0.38;
   const MAX_POV_ALT = 3.2;
   const ALT_DISPLAY_FAR = 2.5;
   const ZOOM_MIN = 1;
