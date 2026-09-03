@@ -1153,6 +1153,9 @@ window.WorldApp = (() => {
 
   function authErrText(e, fallback) {
     const msg = e?.message || fallback;
+    if (e?.code === "auth/redirect-incomplete") {
+      return msg;
+    }
     if (e?.code === "auth/cancelled-popup-request") {
       return "Google sign-in is already opening — wait a moment, then tap once.";
     }
@@ -1307,7 +1310,8 @@ window.WorldApp = (() => {
       }
 
       try {
-        await WorldCloud.completeRedirectSignIn();
+        const redirectUser = await WorldCloud.completeRedirectSignIn();
+        if (redirectUser) await onUser(redirectUser);
       } catch (e) {
         showAuth(true);
         const errEl = $("auth-error");
@@ -1325,6 +1329,7 @@ window.WorldApp = (() => {
             quota ? "warn" : "error"
           );
         }
+        if (u && u.uid === user?.uid) return;
         await onUser(u);
       });
     } catch (e) {

@@ -36,7 +36,6 @@ window.WorldCloud = (() => {
     return `worldData/${uid}`;
   }
 
-  const APP_NAME = "misterWorldwide";
   const REDIRECT_PENDING_KEY = "mw-google-redirect-pending";
   let googleSignInFlight = null;
 
@@ -57,12 +56,34 @@ window.WorldCloud = (() => {
 
   function initFirebase() {
     if (!configured || typeof firebase === "undefined") return { ok: false };
-    const app = firebase.apps.some((a) => a.name === APP_NAME)
-      ? firebase.app(APP_NAME)
-      : firebase.initializeApp(cfg, APP_NAME);
+    let app = null;
+    if (!firebase.apps.length) {
+      app = firebase.initializeApp(cfg);
+    } else {
+      app = firebase.apps.find((a) => a.options?.projectId === cfg.projectId) || firebase.app();
+      if (app.options?.projectId !== cfg.projectId) {
+        try { app.delete(); } catch { /* */ }
+        app = firebase.initializeApp(cfg);
+      }
+    }
     auth = firebase.auth(app);
     db = firebase.firestore(app);
     return { ok: true };
+  }
+
+  async function waitForAuthReady() {
+    if (!auth) return null;
+    if (auth.currentUser) return auth.currentUser;
+    if (typeof auth.authStateReady === "function") {
+      await auth.authStateReady();
+      return auth.currentUser;
+    }
+    return new Promise((resolve) => {
+      const unsub = auth.onAuthStateChanged((u) => {
+        unsub();
+        resolve(u);
+      });
+    });
   }
 
   async function ensureAuthPersistence() {
@@ -96,15 +117,32 @@ window.WorldCloud = (() => {
   async function completeRedirectSignIn() {
     if (!auth) return null;
     await ensureAuthPersistence();
+    const hadRedirect = (() => {
+      try { return sessionStorage.getItem(REDIRECT_PENDING_KEY) === "1"; } catch { return false; }
+    })();
+    let signedInUser = null;
     try {
       const result = await auth.getRedirectResult();
-      try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* */ }
-      if (result?.user) return enforceAllowlist(result.user);
+      if (result?.user) signedInUser = result.user;
     } catch (e) {
-      try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* */ }
       cleanStaleAuthUrl();
       if (!isRedirectRecoverableError(e)) throw e;
-      console.warn("Ignored stale Google redirect state", e);
+      console.warn("Redirect sign-in state missing; checking persisted session", e);
+    } finally {
+      try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* */ }
+    }
+    if (!signedInUser) {
+      await waitForAuthReady();
+      signedInUser = auth.currentUser;
+    }
+    if (signedInUser) {
+      cleanStaleAuthUrl();
+      return enforceAllowlist(signedInUser);
+    }
+    if (hadRedirect) {
+      const err = new Error("Google sign-in did not complete. Tap Continue with Google once more.");
+      err.code = "auth/redirect-incomplete";
+      throw err;
     }
     return null;
   }
@@ -177,13 +215,11 @@ window.WorldCloud = (() => {
 
   function onAuthStateChanged(cb) {
     if (!auth) return () => {};
-    return auth.onAuthStateChanged(async (user) => {
-      try {
-        if (user) user = await enforceAllowlist(user);
-        cb(user);
-      } catch (e) {
-        cb(null, e);
-      }
+    return auth.onAuthStateChanged((user) => {
+      Promise.resolve()
+        .then(async () => (user ? enforceAllowlist(user) : null))
+        .then((u) => cb(u))
+        .catch((e) => cb(null, e));
     });
   }
 
