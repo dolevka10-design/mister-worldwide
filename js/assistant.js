@@ -1001,6 +1001,7 @@
     syncUserFromApp();
     panel.classList.toggle("open", shouldOpen);
     document.body.classList.toggle("assist-open", shouldOpen);
+    WorldApp.setOverlayPanel?.("assistant", shouldOpen);
     if (shouldOpen) panel.removeAttribute("hidden");
     else {
       panel.setAttribute("hidden", "");

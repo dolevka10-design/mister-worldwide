@@ -167,6 +167,7 @@ https://maps.app.goo.gl/..."></textarea>
     if (!panel) return;
     panel.classList.toggle("open", open);
     panel.hidden = !open;
+    WorldApp.setOverlayPanel?.("import", open);
     if (open) render(WorldApp.getState());
   }
 

@@ -595,12 +595,16 @@ html, body {
 .globe-toolbar { top: 0.4rem; right: 0.4rem; }
 .globe-rotate-btn { font-size: 0.72rem; padding: 0.28rem 0.5rem; }
 
-body.country-panel-open .globe-wrap {
+body.country-panel-open .globe-wrap,
+body.overlay-panel-open .globe-wrap {
   pointer-events: none;
 }
 body.country-panel-open .globe-canvas .globe-flag-pin,
 body.country-panel-open .globe-canvas .globe-city-pin,
-body.country-panel-open .globe-canvas .scene-container > div {
+body.country-panel-open .globe-canvas .scene-container > div,
+body.overlay-panel-open .globe-canvas .globe-flag-pin,
+body.overlay-panel-open .globe-canvas .globe-city-pin,
+body.overlay-panel-open .globe-canvas .scene-container > div {
   visibility: hidden !important;
   pointer-events: none !important;
   opacity: 0 !important;

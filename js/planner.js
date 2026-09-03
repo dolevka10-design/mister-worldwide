@@ -18,6 +18,16 @@ window.WorldPlanner = (() => {
   ];
 
   const $ = (id) => document.getElementById(id);
+
+  function displayCity(state, countryId, city) {
+    if (!city || city === "Other") return city === "Other" ? "Other" : "";
+    return WorldApp.cityDisplayLabel?.(countryId, city) || "";
+  }
+
+  function countryIdFromName(state, name) {
+    return state?.countries?.find((c) => c.name === name)?.id || "";
+  }
+
   let open = false;
   let pendingPlace = null;
   let showCreate = false;
@@ -1039,6 +1049,7 @@ window.WorldPlanner = (() => {
         return {
           name: p.name,
           city: p.city || "",
+          countryId: p.countryId || "",
           country: country?.name || "",
           category: PlaceCategorize.plannerLabel(p.category) || PlaceCategorize.label(p.category) || p.category || "",
           url: p.url || "",
@@ -1409,7 +1420,7 @@ window.WorldPlanner = (() => {
       ${reorder ? `<button type="button" class="activity-drag-handle" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Drag to reorder"><span></span><span></span><span></span></button>` : ""}
       <button type="button" class="activity-row-copy" data-act="copy-activity" data-name="${esc(item.name || "")}" data-item="${esc(item.id)}" data-day="${dayNum}" aria-label="Copy ${esc(item.name || "activity")} name" onclick="WorldPlanner.act(event)">
         ${showCategory ? `<span class="activity-row-cat">${categoryIcon(item.category)}</span>` : ""}
-        <span class="activity-row-text">${esc(item.name || "—")}${multi && item.importLocation ? `<small class="activity-row-city">${esc(item.importLocation)}</small>` : ""}</span>
+        <span class="activity-row-text">${esc(item.name || "—")}${multi && item.importLocation ? `<small class="activity-row-city">${esc(displayCity(state, seg?.countryId, item.importLocation) || item.importLocation)}</small>` : ""}</span>
         ${item.time ? `<span class="activity-row-meta">${esc(item.time)}</span>` : ""}
       </button>
       <span class="activity-row-actions">
@@ -1513,6 +1524,7 @@ window.WorldPlanner = (() => {
   }
 
   function showImportSummary(summary) {
+    const state = WorldApp.getState();
     if (!summary) return;
     const list = $("ism-list");
     const placesEl = $("ism-places");
@@ -1529,7 +1541,7 @@ window.WorldPlanner = (() => {
       list.innerHTML = (summary.rows || []).length
         ? summary.rows.map((r) => {
           const extra = r.places ? ` · ${r.places} new` : "";
-          return `<li class="import-summary-row"><span>${esc(r.city)} · ${esc(r.country)}</span><strong>${r.count} ${r.count === 1 ? "activity" : "activities"}${extra}</strong></li>`;
+          return `<li class="import-summary-row"><span>${esc(displayCity(state, countryIdFromName(state, r.country), r.city) || r.city)} · ${esc(r.country)}</span><strong>${r.count} ${r.count === 1 ? "activity" : "activities"}${extra}</strong></li>`;
         }).join("")
         : '<li class="muted">No locations found</li>';
     }
@@ -1541,7 +1553,7 @@ window.WorldPlanner = (() => {
         placesEl.hidden = false;
         placesEl.innerHTML = `<h4 class="import-summary-places-title">New places</h4>
           <ul class="import-summary-places">${places.map((p) => {
-            const meta = [p.city, p.country, p.category].filter(Boolean).join(" · ");
+            const meta = [displayCity(state, p.countryId, p.city) || p.city, p.country, p.category].filter(Boolean).join(" · ");
             const link = p.url && /^https?:\/\//i.test(p.url)
               ? `<a class="place-link" href="${esc(p.url)}" target="_blank" rel="noopener">Maps</a>`
               : "";
@@ -1587,7 +1599,7 @@ window.WorldPlanner = (() => {
     const rows = [
       ["Date", day.date ? fmtDate(day.date) : (item.importDate ? fmtDate(item.importDate) : "—")],
       ["Day", dayLabel],
-      ["City", item.importLocation || seg?.city || "—"],
+      ["City", displayCity(state, seg?.countryId, item.importLocation || seg?.city) || item.importLocation || seg?.city || "—"],
       ["Country", country?.name || "—"],
       ["Time", item.time || "—"],
       ["Category", item.importCategoryLabel || PlaceCategorize.plannerLabel(item.category)],
@@ -1659,7 +1671,9 @@ window.WorldPlanner = (() => {
     const seg = segmentForDay(trip, dayNum);
     const country = state.countries.find((c) => c.id === seg?.countryId);
     const itemCities = [...new Set(itemsOf(day).map((i) => i.importLocation).filter((c) => c && c !== "Other"))];
-    const cityLabel = itemCities.length ? itemCities.join(" · ") : (seg?.city && seg.city !== "Other" ? seg.city : "");
+    const cityLabel = itemCities.length
+      ? itemCities.map((c) => displayCity(state, seg?.countryId, c) || c).join(" · ")
+      : (seg?.city && seg.city !== "Other" ? (displayCity(state, seg?.countryId, seg.city) || seg.city) : "");
     const headline = [
       day.date ? fmtDateLong(day.date) : `Day ${dayNum}`,
       cityLabel,
@@ -1714,7 +1728,7 @@ window.WorldPlanner = (() => {
       <div class="segment-photo" style="${segmentPhotoStyle(seg)}">
         <div class="segment-photo-overlay">
           ${country ? `<img class="segment-flag" src="${CountryMeta.flagUrl(country.iso, 24)}" alt="" width="28" height="20"/>` : ""}
-          <div><strong>${esc(seg.city)}</strong><span class="muted place-meta">${esc(country?.name || "")} · ${days.length} day${days.length === 1 ? "" : "s"}</span></div>
+          <div><strong>${esc(displayCity(state, seg.countryId, seg.city) || seg.city)}</strong><span class="muted place-meta">${esc(country?.name || "")} · ${days.length} day${days.length === 1 ? "" : "s"}</span></div>
         </div>
       </div>
       <div class="segment-card-head">
@@ -1731,7 +1745,7 @@ window.WorldPlanner = (() => {
         <label class="field field-inline"><span class="muted">Start</span><input class="seg-edit-start pill-select" type="date" data-act="seg-field" data-seg="${esc(seg.id)}" data-field="startDate" value="${esc(seg.startDate || "")}" /></label>
         <label class="field field-inline"><span class="muted">End</span><input class="seg-edit-end pill-select" type="date" data-act="seg-field" data-seg="${esc(seg.id)}" data-field="endDate" value="${esc(seg.endDate || "")}" /></label>
       </div>
-      ${guides.length ? `<div class="itin-guides"><h4>Getting around · ${esc(seg.city)}</h4>
+      ${guides.length ? `<div class="itin-guides"><h4>Getting around · ${esc(displayCity(state, seg.countryId, seg.city) || seg.city)}</h4>
         ${guides.map((g) => `<article class="guide-card"><strong>${esc(g.title)}</strong><pre class="guide-body">${esc(g.body)}</pre>
           <button type="button" class="btn btn-ghost btn-sm" data-act="guide-remove" data-guide="${esc(g.id)}">Remove</button></article>`).join("")}
       </div>` : ""}
@@ -2273,12 +2287,12 @@ window.WorldPlanner = (() => {
       if (!trip) { daySel.innerHTML = ""; citySel.innerHTML = ""; return; }
       daySel.innerHTML = (trip.days || []).map((d, i) => {
         const seg = segmentForDay(trip, i + 1);
-        return `<option value="${i + 1}">Day ${i + 1}${d.date ? ` (${d.date})` : ""} — ${esc(seg?.city || "")}</option>`;
+        return `<option value="${i + 1}">Day ${i + 1}${d.date ? ` (${d.date})` : ""} — ${esc(displayCity(state, seg?.countryId, seg?.city) || seg?.city || "")}</option>`;
       }).join("");
       const matchingSegs = (trip.segments || []).filter((s) => s.countryId === place.countryId);
       const segs = matchingSegs.length ? matchingSegs : trip.segments;
       citySel.innerHTML = segs.map((s) =>
-        `<option value="${esc(s.id)}" ${s.city === place.city ? "selected" : ""}>${esc(s.city)}</option>`
+        `<option value="${esc(s.id)}" ${s.city === place.city ? "selected" : ""}>${esc(displayCity(state, s.countryId, s.city) || s.city)}</option>`
       ).join("");
     };
     fill();
@@ -2294,7 +2308,7 @@ window.WorldPlanner = (() => {
       return WorldApp.toast("Create a trip first in Planner", "warn");
     }
     pendingPlace = place;
-    $("tam-place-name").textContent = `${place.name} · ${place.city}`;
+    $("tam-place-name").textContent = `${place.name} · ${WorldApp.cityDisplayLabel?.(place.countryId, place.city) || place.city}`;
     populateTripModal(state, place);
     const modal = $("trip-add-modal");
     if (modal) modal.hidden = false;
@@ -2342,6 +2356,7 @@ window.WorldPlanner = (() => {
     if (!panel) return;
     panel.classList.toggle("open", open);
     panel.hidden = !open;
+    WorldApp.setOverlayPanel?.("planner", open);
     if (open) {
       const st = WorldApp.getState();
       const planner = ensurePlanner(st);
@@ -2354,6 +2369,7 @@ window.WorldPlanner = (() => {
       }
       syncUiFromState(st);
       render(st);
+      WorldApp.refresh?.();
     }
   }
 

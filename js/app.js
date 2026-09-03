@@ -18,7 +18,7 @@ window.WorldApp = (() => {
   let placeIdFilter = null;
   let dayPanelLabel = "";
   let placeIdOrder = [];
-  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v6";
+  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v7";
   const KNOWN_CITY_CENTERS = {
     "united-states|Brooklyn": { lat: 40.6782, lng: -73.9442 },
     "united-states|Manhattan": { lat: 40.7831, lng: -73.9712 },
@@ -31,6 +31,21 @@ window.WorldApp = (() => {
   };
   const cityCenterCache = new Map();
   let cityCenterResolveGen = 0;
+  const overlayPanels = new Set();
+
+  function syncGlobeOverlay() {
+    const countryOpen = document.body.classList.contains("country-panel-open");
+    const overlayOpen = overlayPanels.size > 0;
+    document.body.classList.toggle("overlay-panel-open", overlayOpen);
+    WorldGlobe.setPinsVisible?.(!(countryOpen || overlayOpen));
+  }
+
+  function setOverlayPanel(id, open) {
+    if (open) overlayPanels.add(id);
+    else overlayPanels.delete(id);
+    syncGlobeOverlay();
+  }
+
 
   function isLatinLabel(text) {
     const s = String(text || "").trim();
@@ -210,6 +225,7 @@ window.WorldApp = (() => {
             dayNum,
             dayDate: day.date || null,
             dayKey: `${trip.id}|${dayNum}`,
+            countryId,
             city,
             category: item.category || "place",
             categoryLabel,
@@ -343,19 +359,19 @@ window.WorldApp = (() => {
   }
 
   function cityDisplayLabel(countryId, city) {
+    if (!city || city === "Other") return city === "Other" ? "Other" : "";
     const key = cityCenterKey(countryId, city);
     const cached = cityCenterCache.get(key);
     if (cached?.labelEn && isLatinLabel(cached.labelEn)) return cached.labelEn;
-    if (isLatinLabel(city)) return city;
     const mixed = extractLatinFromMixed(city);
-    if (mixed) return mixed;
+    if (mixed && mixed !== city) return mixed;
     return "";
   }
 
   function needsEnglishCityLabel(existing, city) {
     if (!existing?.labelEn) return true;
     if (!isLatinLabel(existing.labelEn)) return true;
-    if (!isLatinLabel(city) && existing.labelEn === city) return true;
+    if (existing.labelEn === city) return true;
     return false;
   }
 
@@ -380,9 +396,10 @@ window.WorldApp = (() => {
   }
 
   async function resolveEnglishCityLabel(city, countryName, lat, lng, places) {
-    if (isLatinLabel(city)) return city;
-    const fromMixed = extractLatinFromMixed(city);
-    if (fromMixed) return fromMixed;
+    if (!isLatinLabel(city)) {
+      const fromMixed = extractLatinFromMixed(city);
+      if (fromMixed) return fromMixed;
+    }
 
     const center = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : fallbackCityCenter(places);
     if (center) {
@@ -396,6 +413,7 @@ window.WorldApp = (() => {
       const latin = extractLatinFromMixed(photon.labelEn);
       if (latin) return latin;
     }
+    if (isLatinLabel(city)) return city;
     return "";
   }
 
@@ -457,7 +475,7 @@ window.WorldApp = (() => {
     const known = knownCityCenter(countryId, city);
     const fallback = fallbackCityCenter(places);
     if (known) {
-      const labelEn = isLatinLabel(city) ? city : await resolveEnglishCityLabel(city, countryName, known.lat, known.lng, places);
+      const labelEn = await resolveEnglishCityLabel(city, countryName, known.lat, known.lng, places);
       return { ...known, labelEn: labelEn || "" };
     }
     try {
@@ -491,7 +509,7 @@ window.WorldApp = (() => {
       const known = knownCityCenter(g.countryId, g.city);
       const existing = cityCenterCache.get(key);
       if (known && !existing) {
-        cityCenterCache.set(key, { ...known, labelEn: isLatinLabel(g.city) ? g.city : "" });
+        cityCenterCache.set(key, { ...known, labelEn: "" });
         continue;
       }
       const needsCoords = !Number.isFinite(existing?.lat) && !known;
@@ -528,6 +546,8 @@ window.WorldApp = (() => {
       if (WorldGlobe.getPinViewMode?.() === "city" && WorldGlobe.isReady?.()) {
         WorldGlobe.refreshCityPins?.();
       }
+      if (WorldPlanner?.isOpen?.()) WorldPlanner.render?.(state);
+      if (selectedCountry) renderCountryPanel();
       if (i + batchSize < pending.length) await new Promise((r) => setTimeout(r, 1100));
     }
   }
@@ -566,9 +586,9 @@ window.WorldApp = (() => {
   }
 
   function openCountryPanel() {
-    WorldGlobe.setPinsVisible?.(false);
     document.body.classList.add("country-panel-open");
     $("country-panel")?.classList.add("open");
+    syncGlobeOverlay();
   }
 
   function closeCountryPanel() {
@@ -578,6 +598,7 @@ window.WorldApp = (() => {
     clearDayPlaceFilter();
     filterCity = "";
     WorldGlobe.restoreCountryPins?.();
+    syncGlobeOverlay();
     renderCountryList();
   }
 
@@ -685,7 +706,10 @@ window.WorldApp = (() => {
       const tripCitySel = $("trip-city-filter");
       if (tripCitySel) {
         tripCitySel.innerHTML = `<option value="">All cities</option>` +
-          tripCities.map((c) => `<option value="${esc(c)}" ${tripCityFilter === c ? "selected" : ""}>${esc(c)}</option>`).join("");
+          tripCities.map((c) => {
+          const label = cityDisplayLabel(selectedCountry, c) || c;
+          return `<option value="${esc(c)}" ${tripCityFilter === c ? "selected" : ""}>${esc(label)}</option>`;
+        }).join("");
       }
       const tripCatSel = $("trip-activity-cat-filter");
       if (tripCatSel) {
@@ -752,8 +776,10 @@ window.WorldApp = (() => {
     const cityFilter = $("city-filter");
     if (cityFilter) {
       cityFilter.innerHTML = `<option value="">All cities</option>` +
-        cities.map((c) => `<option value="${esc(c)}" ${filterCity === c ? "selected" : ""}>${esc(c)}</option>`)
-          .join("");
+        cities.map((c) => {
+          const label = cityDisplayLabel(selectedCountry, c) || c;
+          return `<option value="${esc(c)}" ${filterCity === c ? "selected" : ""}>${esc(label)}</option>`;
+        }).join("");
     }
 
     const sortSel = $("sort-by");
@@ -798,7 +824,8 @@ window.WorldApp = (() => {
 
   function tripActivityCard(a) {
     const dayLabel = a.dayDate ? `Day ${a.dayNum} · ${fmtShortDate(a.dayDate)}` : `Day ${a.dayNum}`;
-    const meta = [dayLabel, a.city, a.categoryLabel].filter(Boolean).join(" · ");
+    const cityLabel = cityDisplayLabel(a.countryId, a.city) || a.city;
+    const meta = [dayLabel, cityLabel, a.categoryLabel].filter(Boolean).join(" · ");
     return `
       <li class="place-card trip-activity-card">
         <div class="place-main">
@@ -818,7 +845,7 @@ window.WorldApp = (() => {
       <li class="place-card">
         <div class="place-main">
           <strong>${esc(p.name)}</strong>
-          <span class="place-meta">${esc(p.city)} · ${PlaceCategorize.label(p.category)}</span>
+          <span class="place-meta">${esc(cityDisplayLabel(p.countryId, p.city) || p.city)} · ${PlaceCategorize.label(p.category)}</span>
         </div>
         <div class="place-actions">
           <button type="button" class="btn btn-ghost btn-sm" data-add-trip="${esc(p.id)}" title="Add to trip">+ Trip</button>
@@ -1225,7 +1252,8 @@ window.WorldApp = (() => {
   return {
     start, ready: () => ready, getState, setState, cloneState, persist, persistNav, persistPlanner, refresh, toast,
     getUser: () => user,
-    selectCountry, selectCityInCountry, showDayPlacesOnCountry, get selectedCountry() { return selectedCountry; },
+    selectCountry, selectCityInCountry, showDayPlacesOnCountry, cityDisplayLabel, setOverlayPanel,
+    get selectedCountry() { return selectedCountry; },
   };
 })();
 
