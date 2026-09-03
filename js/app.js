@@ -434,6 +434,22 @@ window.WorldApp = (() => {
     return pins;
   }
 
+  function openCountryPanel() {
+    WorldGlobe.setPinsVisible?.(false);
+    document.body.classList.add("country-panel-open");
+    $("country-panel")?.classList.add("open");
+  }
+
+  function closeCountryPanel() {
+    $("country-panel")?.classList.remove("open");
+    document.body.classList.remove("country-panel-open");
+    selectedCountry = null;
+    clearDayPlaceFilter();
+    filterCity = "";
+    WorldGlobe.restoreCountryPins?.();
+    renderCountryList();
+  }
+
   function selectCityInCountry(countryId, city) {
     if (!countryId || !city) return;
     clearDayPlaceFilter();
@@ -455,7 +471,7 @@ window.WorldApp = (() => {
     else WorldGlobe.focusCountry(countryId);
     renderCountryList();
     renderCountryPanel();
-    $("country-panel")?.classList.add("open");
+    openCountryPanel();
   }
 
   function selectCountry(countryId, { keepDayFilter = false } = {}) {
@@ -476,7 +492,7 @@ window.WorldApp = (() => {
     WorldGlobe.focusCountry(countryId);
     renderCountryList();
     renderCountryPanel();
-    $("country-panel")?.classList.add("open");
+    openCountryPanel();
   }
 
   function showDayPlacesOnCountry(countryId, placeIds, { city, label, order } = {}) {
@@ -495,10 +511,9 @@ window.WorldApp = (() => {
     if (q) q.value = "";
     viewMode = "list";
     setActiveViewTab("view-list");
-    WorldGlobe.setPinsVisible?.(false);
     renderCountryList();
     renderCountryPanel();
-    $("country-panel")?.classList.add("open");
+    openCountryPanel();
     $("app-root")?.classList.remove("hidden");
   }
 
@@ -691,12 +706,7 @@ window.WorldApp = (() => {
 
   function bindUi() {
     $("btn-close-panel")?.addEventListener("click", () => {
-      $("country-panel")?.classList.remove("open");
-      selectedCountry = null;
-      clearDayPlaceFilter();
-      filterCity = "";
-      WorldGlobe.restoreCountryPins?.();
-      renderCountryList();
+      closeCountryPanel();
     });
 
     $("btn-toggle-filters")?.addEventListener("click", () => {

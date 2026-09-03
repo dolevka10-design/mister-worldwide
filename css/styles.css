@@ -467,6 +467,13 @@ html, body {
 .globe-canvas.globe-pins-locked .globe-city-pin {
   pointer-events: none;
 }
+.globe-canvas.globe-pins-suppressed .globe-flag-pin,
+.globe-canvas.globe-pins-suppressed .globe-city-pin,
+.globe-canvas.globe-pins-suppressed .scene-container > div {
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
 
 .globe-flag-pin {
   display: flex;
@@ -581,6 +588,17 @@ html, body {
 .globe-toolbar { top: 0.4rem; right: 0.4rem; }
 .globe-rotate-btn { font-size: 0.72rem; padding: 0.28rem 0.5rem; }
 
+body.country-panel-open .globe-wrap {
+  pointer-events: none;
+}
+body.country-panel-open .globe-canvas .globe-flag-pin,
+body.country-panel-open .globe-canvas .globe-city-pin,
+body.country-panel-open .globe-canvas .scene-container > div {
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
 .country-panel {
   position: fixed;
   left: 0;
@@ -596,7 +614,7 @@ html, body {
   border-radius: 0;
   transform: translateY(100%);
   transition: transform 0.3s ease;
-  z-index: 45;
+  z-index: 50;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);

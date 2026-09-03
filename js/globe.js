@@ -916,12 +916,12 @@ window.WorldGlobe = (() => {
   function restoreCountryPins() {
     if (!globe) return;
     dayMode = false;
-    pinsVisible = true;
-    applyPinView();
+    setPinsVisible(true);
   }
 
   function setPinsVisible(visible) {
     pinsVisible = !!visible;
+    container?.classList.toggle("globe-pins-suppressed", !visible);
     if (!globe || dayMode) return;
     applyPinView();
   }
