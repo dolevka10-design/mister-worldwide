@@ -746,8 +746,8 @@ window.WorldGlobe = (() => {
     const hasLabel = label.length > 0;
     if (!hasLabel) el.classList.add("globe-city-pin--pending");
     const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-    el.title = hasLabel ? `${label} (${d.placeCount} places)` : "Resolving city name…";
-    el.setAttribute("aria-label", hasLabel ? `${label}, ${d.placeCount} places` : `City pin, ${d.placeCount} places`);
+    el.title = hasLabel ? `${label} (${d.placeCount} places)` : `${d.placeCount} places`;
+    el.setAttribute("aria-label", hasLabel ? `${label}, ${d.placeCount} places` : `${d.placeCount} places`);
     const shortCity = label.length > 14 ? `${label.slice(0, 12)}…` : label;
     el.innerHTML = hasLabel
       ? `
@@ -756,7 +756,9 @@ window.WorldGlobe = (() => {
         <span class="globe-city-label">${esc(shortCity)}</span>
         <span class="globe-city-count">${d.placeCount}</span>
       </span>`
-      : `<span class="globe-city-dot globe-city-dot--pending" aria-hidden="true"></span>`;
+      : `
+      <span class="globe-city-dot" aria-hidden="true"></span>
+      <span class="globe-city-count globe-city-count--solo">${d.placeCount}</span>`;
     bindPinTap(el, () => selectCity(d.countryId, d.city));
     return el;
   }
@@ -917,7 +919,6 @@ window.WorldGlobe = (() => {
   function setPinViewMode(mode) {
     pinViewMode = mode === "city" ? "city" : "country";
     applyPinView();
-    if (pinViewMode === "city") WorldApp.resolveCityLabels?.();
   }
 
   function restoreCountryPins() {
