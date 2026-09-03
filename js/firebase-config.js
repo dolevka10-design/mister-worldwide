@@ -4,13 +4,13 @@
  * See SETUP.md for authorized domains and Firestore rules.
  */
 window.FIREBASE_CONFIG = {
-  apiKey: "PASTE_MW_FIREBASE_API_KEY",
+  apiKey: "AIzaSyB8UdV-q43p7ArATsyxv5jP4C5PWNHBD8U",
   authDomain: "mister-worldwide-d0e1e.firebaseapp.com",
   projectId: "mister-worldwide-d0e1e",
   storageBucket: "mister-worldwide-d0e1e.firebasestorage.app",
-  messagingSenderId: "PASTE_MW_MESSAGING_SENDER_ID",
-  appId: "PASTE_MW_FIREBASE_APP_ID",
-  measurementId: "PASTE_MW_MEASUREMENT_ID"
+  messagingSenderId: "542722431841",
+  appId: "1:542722431841:web:4fa2b244330b0393db8320",
+  measurementId: "G-YV8G84JNQ6"
 };
 
 window.ALLOWED_EMAILS = [
