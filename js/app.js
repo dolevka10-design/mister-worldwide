@@ -1153,6 +1153,9 @@ window.WorldApp = (() => {
 
   function authErrText(e, fallback) {
     const msg = e?.message || fallback;
+    if (/missing initial state/i.test(msg)) {
+      return "Google sign-in was interrupted. Close other tabs for this site, avoid Private Browsing, then tap Continue with Google again.";
+    }
     if (e?.code !== "auth/unauthorized-domain") return msg;
     const host = location.hostname;
     const project = window.FIREBASE_CONFIG?.projectId || "mister-worldwide-d0e1e";
@@ -1169,7 +1172,10 @@ window.WorldApp = (() => {
 
     $("btn-google")?.addEventListener("click", async () => {
       setErr("");
-      try { await WorldCloud.signInWithGoogle(); }
+      try {
+        const u = await WorldCloud.signInWithGoogle();
+        if (u === null) return; // redirect in progress
+      }
       catch (e) { setErr(authErrText(e, "Google sign-in failed")); }
     });
 
@@ -1279,6 +1285,17 @@ window.WorldApp = (() => {
       if (!init.ok) {
         await onUser(null);
         return;
+      }
+
+      try {
+        await WorldCloud.completeRedirectSignIn();
+      } catch (e) {
+        showAuth(true);
+        const errEl = $("auth-error");
+        if (errEl) {
+          errEl.hidden = false;
+          errEl.textContent = authErrText(e, "Google sign-in failed");
+        }
       }
 
       WorldCloud.onAuthStateChanged(async (u, err) => {

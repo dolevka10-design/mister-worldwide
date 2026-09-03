@@ -37,6 +37,7 @@ window.WorldCloud = (() => {
   }
 
   const APP_NAME = "misterWorldwide";
+  const REDIRECT_PENDING_KEY = "mw-google-redirect-pending";
 
   function initFirebase() {
     if (!configured || typeof firebase === "undefined") return { ok: false };
@@ -46,6 +47,56 @@ window.WorldCloud = (() => {
     auth = firebase.auth(app);
     db = firebase.firestore(app);
     return { ok: true };
+  }
+
+  async function ensureAuthPersistence() {
+    if (!auth?.setPersistence) return;
+    try {
+      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    } catch (e) {
+      console.warn("Auth persistence fallback", e);
+    }
+  }
+
+  function googleAuthProvider() {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    return provider;
+  }
+
+  function isRedirectRecoverableError(e) {
+    const msg = String(e?.message || e?.code || "");
+    return /missing initial state|auth\/no-auth-event/i.test(msg);
+  }
+
+  function cleanStaleAuthUrl() {
+    const hash = location.hash || "";
+    if (!/apiKey=|authUser=|error=/.test(hash)) return;
+    try {
+      history.replaceState(null, "", location.pathname + location.search);
+    } catch { /* */ }
+  }
+
+  async function completeRedirectSignIn() {
+    if (!auth) return null;
+    await ensureAuthPersistence();
+    try {
+      const result = await auth.getRedirectResult();
+      try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* */ }
+      if (result?.user) return enforceAllowlist(result.user);
+    } catch (e) {
+      try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* */ }
+      cleanStaleAuthUrl();
+      if (!isRedirectRecoverableError(e)) throw e;
+      console.warn("Ignored stale Google redirect state", e);
+    }
+    return null;
+  }
+
+  function shouldFallbackToRedirect(e) {
+    const code = e?.code || "";
+    return code === "auth/popup-blocked"
+      || code === "auth/operation-not-supported-in-this-environment";
   }
 
   async function rejectUnauthorizedUser(user) {
@@ -75,9 +126,16 @@ window.WorldCloud = (() => {
   }
 
   async function signInWithGoogle() {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" });
-    return enforceAllowlist((await auth.signInWithPopup(provider)).user);
+    await ensureAuthPersistence();
+    const provider = googleAuthProvider();
+    try {
+      return enforceAllowlist((await auth.signInWithPopup(provider)).user);
+    } catch (e) {
+      if (!shouldFallbackToRedirect(e)) throw e;
+      try { sessionStorage.setItem(REDIRECT_PENDING_KEY, "1"); } catch { /* */ }
+      await auth.signInWithRedirect(provider);
+      return null;
+    }
   }
 
   async function signOut() {
@@ -218,7 +276,7 @@ window.WorldCloud = (() => {
   }
 
   return {
-    configured, initFirebase, isAllowedEmail, isQuotaError, isQuotaPaused, resumeQuota,
+    configured, initFirebase, completeRedirectSignIn, isAllowedEmail, isQuotaError, isQuotaPaused, resumeQuota,
     signIn, signUp, signInWithGoogle, signOut, onAuthStateChanged,
     loadFromCloud, scheduleSave, flushSave, listenCloud, isApplyingRemote,
     saveAssistantChat, loadAssistantChat,

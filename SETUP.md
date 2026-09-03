@@ -90,6 +90,7 @@ No native build required.
 ## 6. Troubleshooting
 
 - **`auth/unauthorized-domain`** — the site hostname is not in Firebase Auth authorized domains. Open [Authentication settings](https://console.firebase.google.com/project/mister-worldwide-d0e1e/authentication/settings) → **Authorized domains** → **Add domain** → paste the hostname from the sign-in error (e.g. `mister-worldwide.dolevka10.workers.dev`).
+- **Missing initial state / Google redirect failed** — usually a stale or blocked redirect on iOS/Safari. Hard-refresh, avoid Private Browsing, close duplicate tabs, then use **Continue with Google** again (the app uses popup sign-in and only redirects if the popup is blocked).
 - **Sign-in shows Money Planner** — `js/firebase-config.js` still points at the wrong Firebase project; replace it with the **Mister Worldwide** web app config from Project settings.
 - **Empty country bar / 0 stats on load** — hard refresh; ensure you are on the latest deploy.
 - **Globe blank** — check browser console; ensure `globe.gl` CDN is reachable.
