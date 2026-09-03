@@ -584,6 +584,13 @@ html, body {
   padding: 0.02rem 0.3rem;
   line-height: 1.2;
 }
+.globe-city-pin--pending .globe-city-count--solo {
+  position: absolute;
+  left: 50%;
+  bottom: calc(50% + 6px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
 
 .globe-toolbar { top: 0.4rem; right: 0.4rem; }
 .globe-rotate-btn { font-size: 0.72rem; padding: 0.28rem 0.5rem; }

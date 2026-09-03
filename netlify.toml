@@ -19,6 +19,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/geocode/label"
+  to = "/.netlify/functions/geocode-label"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

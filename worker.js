@@ -1,6 +1,7 @@
 /**
  * Cloudflare Worker — static SPA + API routes for LLM proxy and Maps resolve.
  */
+import { handleGeocodeLabel } from "./workers/geocode.js";
 import { handleLlm } from "./workers/llm.js";
 import { handleResolveMaps } from "./workers/resolve-maps.js";
 
@@ -15,6 +16,10 @@ export default {
 
     if (path === "/api/resolve-maps" || path === "/.netlify/functions/resolve-maps") {
       return handleResolveMaps(request, url);
+    }
+
+    if (path === "/api/geocode/label" || path === "/.netlify/functions/geocode-label") {
+      return handleGeocodeLabel(request, url);
     }
 
     return env.ASSETS.fetch(request);
