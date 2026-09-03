@@ -2,12 +2,33 @@
 
 ## 1. Firebase
 
-1. Create a project at [Firebase Console](https://console.firebase.google.com/)
-2. Add a **Web app** → copy config into `js/firebase-config.js`
-3. **Authentication** → Enable **Google** and **Email/Password**
-4. **Firestore** → Create database → paste `firestore.rules` → Publish
-5. **Auth → Settings → Authorized domains** → add `localhost` and your Netlify domain
-6. Update `ALLOWED_EMAILS` in `js/firebase-config.js` **and** `firestore.rules` (same emails)
+Project: **`mister-worldwide-d0e1e`** (not Money Planner).
+
+1. [Firebase Console](https://console.firebase.google.com/project/mister-worldwide-d0e1e) → add a **Web app** → copy config into `js/firebase-config.js`
+2. **Authentication** → Enable **Google** and **Email/Password**
+3. **Firestore** → Create database → paste `firestore.rules` → Publish
+4. **Authentication → [Settings → Authorized domains](https://console.firebase.google.com/project/mister-worldwide-d0e1e/authentication/settings)** — add every hostname you open the app from:
+   - `localhost`
+   - `mister-worldwide.dolevka10.workers.dev` (Cloudflare Workers)
+   - `mister-worldwide.netlify.app` (if using Netlify)
+   - Any custom domain you use
+5. Update `ALLOWED_EMAILS` in `js/firebase-config.js` **and** `firestore.rules` (same emails)
+
+If Google sign-in shows `auth/unauthorized-domain`, copy the hostname from the error (or your browser address bar) and add it as an authorized domain in step 4.
+
+### Cloudflare Workers build env (optional)
+
+`npm run build` can inject Firebase config from environment variables (useful so secrets stay out of git). Set in Cloudflare Workers → Settings → Variables:
+
+- `MW_FIREBASE_API_KEY`
+- `MW_FIREBASE_PROJECT_ID` (default: `mister-worldwide-d0e1e`)
+- `MW_FIREBASE_AUTH_DOMAIN`
+- `MW_FIREBASE_STORAGE_BUCKET`
+- `MW_FIREBASE_MESSAGING_SENDER_ID`
+- `MW_FIREBASE_APP_ID`
+- `MW_FIREBASE_MEASUREMENT_ID` (optional)
+
+Values are in Firebase Console → Project settings → Your apps → Web app → Config.
 
 ## 2. Netlify deploy
 
@@ -68,6 +89,8 @@ No native build required.
 
 ## 6. Troubleshooting
 
+- **`auth/unauthorized-domain`** — the site hostname is not in Firebase Auth authorized domains. Open [Authentication settings](https://console.firebase.google.com/project/mister-worldwide-d0e1e/authentication/settings) → **Authorized domains** → **Add domain** → paste the hostname from the sign-in error (e.g. `mister-worldwide.dolevka10.workers.dev`).
+- **Sign-in shows Money Planner** — `js/firebase-config.js` still points at the wrong Firebase project; replace it with the **Mister Worldwide** web app config from Project settings.
 - **Empty country bar / 0 stats on load** — hard refresh; ensure you are on the latest deploy.
 - **Globe blank** — check browser console; ensure `globe.gl` CDN is reachable.
 - **Planner AI** — requires a Groq/OpenRouter key in the assistant; use **Quick suggest** for zero-token local picks.

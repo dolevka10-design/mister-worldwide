@@ -1151,6 +1151,14 @@ window.WorldApp = (() => {
     window.addEventListener("orientationchange", () => setTimeout(() => ensureGlobe(), 200));
   }
 
+  function authErrText(e, fallback) {
+    const msg = e?.message || fallback;
+    if (e?.code !== "auth/unauthorized-domain") return msg;
+    const host = location.hostname;
+    const project = window.FIREBASE_CONFIG?.projectId || "mister-worldwide-d0e1e";
+    return `${msg} Add "${host}" under Firebase → Authentication → Settings → Authorized domains (project: ${project}).`;
+  }
+
   function bindAuth() {
     const errEl = $("auth-error");
     const setErr = (msg) => {
@@ -1162,7 +1170,7 @@ window.WorldApp = (() => {
     $("btn-google")?.addEventListener("click", async () => {
       setErr("");
       try { await WorldCloud.signInWithGoogle(); }
-      catch (e) { setErr(e.message || "Google sign-in failed"); }
+      catch (e) { setErr(authErrText(e, "Google sign-in failed")); }
     });
 
     $("auth-form")?.addEventListener("submit", async (e) => {
@@ -1171,7 +1179,7 @@ window.WorldApp = (() => {
       const email = $("auth-email")?.value;
       const password = $("auth-password")?.value;
       try { await WorldCloud.signIn(email, password); }
-      catch (err) { setErr(err.message || "Sign in failed"); }
+      catch (err) { setErr(authErrText(err, "Sign in failed")); }
     });
 
     $("btn-signup")?.addEventListener("click", async () => {
@@ -1179,7 +1187,7 @@ window.WorldApp = (() => {
       const email = $("auth-email")?.value;
       const password = $("auth-password")?.value;
       try { await WorldCloud.signUp(email, password); }
-      catch (err) { setErr(err.message || "Sign up failed"); }
+      catch (err) { setErr(authErrText(err, "Sign up failed")); }
     });
 
     $("btn-logout")?.addEventListener("click", () => WorldCloud.signOut());

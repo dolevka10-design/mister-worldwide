@@ -57,6 +57,39 @@ function writeHeaders(dir) {
   fs.writeFileSync(path.join(dir, "_headers"), headers);
 }
 
+function writeFirebaseConfig(destPath) {
+  const env = process.env;
+  const apiKey = env.MW_FIREBASE_API_KEY || env.FIREBASE_API_KEY;
+  const projectId = env.MW_FIREBASE_PROJECT_ID || env.FIREBASE_PROJECT_ID || "mister-worldwide-d0e1e";
+  if (!apiKey || String(apiKey).startsWith("PASTE_")) return false;
+
+  const authDomain = env.MW_FIREBASE_AUTH_DOMAIN || env.FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`;
+  const storageBucket = env.MW_FIREBASE_STORAGE_BUCKET || env.FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`;
+  const messagingSenderId = env.MW_FIREBASE_MESSAGING_SENDER_ID || env.FIREBASE_MESSAGING_SENDER_ID || "";
+  const appId = env.MW_FIREBASE_APP_ID || env.FIREBASE_APP_ID || "";
+  const measurementId = env.MW_FIREBASE_MEASUREMENT_ID || env.FIREBASE_MEASUREMENT_ID || "";
+
+  const lines = [
+    "/** Generated at build time from MW_FIREBASE_* / FIREBASE_* env vars. */",
+    "window.FIREBASE_CONFIG = {",
+    `  apiKey: ${JSON.stringify(apiKey)},`,
+    `  authDomain: ${JSON.stringify(authDomain)},`,
+    `  projectId: ${JSON.stringify(projectId)},`,
+    `  storageBucket: ${JSON.stringify(storageBucket)},`,
+    `  messagingSenderId: ${JSON.stringify(messagingSenderId)},`,
+    `  appId: ${JSON.stringify(appId)},`,
+  ];
+  if (measurementId) lines.push(`  measurementId: ${JSON.stringify(measurementId)}`);
+  lines.push("};", "");
+  lines.push("window.ALLOWED_EMAILS = [");
+  lines.push('  "dolevka10@gmail.com",');
+  lines.push('  "shirleibovich94@gmail.com",');
+  lines.push("];", "");
+  lines.push('window.FIREBASE_WORLD_MODE = "per-user";', "");
+  fs.writeFileSync(destPath, lines.join("\n"));
+  return true;
+}
+
 rmrf(out);
 fs.mkdirSync(out, { recursive: true });
 
@@ -79,5 +112,10 @@ for (const file of DATA_FILES) {
 const version = buildVersion();
 injectVersion(path.join(out, "index.html"), version);
 writeHeaders(out);
+
+const firebaseOut = path.join(out, "js", "firebase-config.js");
+if (writeFirebaseConfig(firebaseOut)) {
+  console.log("Wrote dist/js/firebase-config.js from environment variables");
+}
 
 console.log(`Prepared dist/ for deploy (version ${version})`);

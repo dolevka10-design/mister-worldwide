@@ -36,11 +36,15 @@ window.WorldCloud = (() => {
     return `worldData/${uid}`;
   }
 
+  const APP_NAME = "misterWorldwide";
+
   function initFirebase() {
     if (!configured || typeof firebase === "undefined") return { ok: false };
-    if (!firebase.apps.length) firebase.initializeApp(cfg);
-    auth = firebase.auth();
-    db = firebase.firestore();
+    const app = firebase.apps.some((a) => a.name === APP_NAME)
+      ? firebase.app(APP_NAME)
+      : firebase.initializeApp(cfg, APP_NAME);
+    auth = firebase.auth(app);
+    db = firebase.firestore(app);
     return { ok: true };
   }
 
