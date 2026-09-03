@@ -1282,11 +1282,12 @@ input[type="date"]::-webkit-date-and-time-value {
   align-items: center;
   gap: 0.2rem;
   margin-bottom: 0.25rem;
+  flex-shrink: 0;
 }
 .day-scroll-btn {
   flex: 0 0 auto;
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.75rem;
+  height: 1.75rem;
   font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
@@ -1295,19 +1296,12 @@ input[type="date"]::-webkit-date-and-time-value {
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.day-chips-strip:hover .day-scroll-btn,
-.day-chips-strip:focus-within .day-scroll-btn {
   opacity: 1;
+  flex-shrink: 0;
 }
 .day-scroll-btn:disabled {
   opacity: 0.35;
   cursor: default;
-}
-@media (hover: none) {
-  .day-scroll-btn { opacity: 1; }
 }
 .day-nav-chips {
   display: flex;
@@ -1318,8 +1312,8 @@ input[type="date"]::-webkit-date-and-time-value {
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x;
-  scroll-snap-type: x proximity;
-  padding: 0.15rem 0.25rem 0.65rem;
+  scroll-behavior: auto;
+  padding: 0.15rem 0.1rem 0.35rem;
   margin-bottom: 0;
   max-width: 100%;
   flex: 1;
@@ -1329,7 +1323,6 @@ input[type="date"]::-webkit-date-and-time-value {
 .day-nav-chips::-webkit-scrollbar { display: none; }
 .day-nav-chip {
   flex: 0 0 auto;
-  scroll-snap-align: center;
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text);
@@ -1337,8 +1330,10 @@ input[type="date"]::-webkit-date-and-time-value {
   padding: 0.45rem 0.75rem;
   font: inherit;
   font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
   min-height: 44px;
-  min-width: 44px;
+  min-width: 5.5rem;
+  text-align: center;
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: rgba(124, 240, 255, 0.2);
