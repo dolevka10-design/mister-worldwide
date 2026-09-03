@@ -18,7 +18,7 @@ window.WorldApp = (() => {
   let placeIdFilter = null;
   let dayPanelLabel = "";
   let placeIdOrder = [];
-  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v7";
+  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v8";
   const KNOWN_CITY_CENTERS = {
     "united-states|Brooklyn": { lat: 40.6782, lng: -73.9442 },
     "united-states|Manhattan": { lat: 40.7831, lng: -73.9712 },
@@ -54,6 +54,17 @@ window.WorldApp = (() => {
       return false;
     }
     return /[A-Za-z]/.test(s);
+  }
+
+  function normalizeCityLabel(text) {
+    return String(text || "")
+      .replace(/\s+(District|Municipality|Subdistrict|County|Province)$/i, "")
+      .trim();
+  }
+
+  function isDisplayableCityLabel(text) {
+    const s = String(text || "").trim();
+    return s.length > 0 && s !== "Other";
   }
 
   function extractLatinFromMixed(text) {
@@ -278,6 +289,8 @@ window.WorldApp = (() => {
     try {
       const raw =
         localStorage.getItem(CITY_CENTER_KEY) ||
+        localStorage.getItem("mister-worldwide-city-centers-v7") ||
+        localStorage.getItem("mister-worldwide-city-centers-v6") ||
         localStorage.getItem("mister-worldwide-city-centers-v5") ||
         localStorage.getItem("mister-worldwide-city-centers-v4") ||
         localStorage.getItem("mister-worldwide-city-centers-v3");
@@ -359,13 +372,15 @@ window.WorldApp = (() => {
   }
 
   function cityDisplayLabel(countryId, city) {
-    if (!city || city === "Other") return city === "Other" ? "Other" : "";
+    if (!isDisplayableCityLabel(city)) return city === "Other" ? "Other" : "";
     const key = cityCenterKey(countryId, city);
     const cached = cityCenterCache.get(key);
-    if (cached?.labelEn && isLatinLabel(cached.labelEn)) return cached.labelEn;
+    const english = normalizeCityLabel(cached?.labelEn);
+    if (english && isLatinLabel(english)) return english;
     const mixed = extractLatinFromMixed(city);
     if (mixed && mixed !== city) return mixed;
-    return "";
+    if (isLatinLabel(city)) return normalizeCityLabel(city) || city;
+    return city;
   }
 
   function needsEnglishCityLabel(existing, city) {
@@ -395,6 +410,29 @@ window.WorldApp = (() => {
     }
   }
 
+  async function photonReverseEnglishLabel(lat, lng) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+    try {
+      const res = await fetch(
+        `https://photon.komoot.io/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&lang=en`
+      );
+      if (!res.ok) return "";
+      const data = await res.json();
+      const candidates = [];
+      for (const feature of data?.features || []) {
+        const p = feature?.properties || {};
+        candidates.push(p.city, p.town, p.municipality, p.district, p.locality, p.county, p.name);
+      }
+      for (const c of candidates) {
+        const s = normalizeCityLabel(c);
+        if (s && isLatinLabel(s)) return s;
+      }
+    } catch {
+      /* ignore */
+    }
+    return "";
+  }
+
   async function resolveEnglishCityLabel(city, countryName, lat, lng, places) {
     if (!isLatinLabel(city)) {
       const fromMixed = extractLatinFromMixed(city);
@@ -403,17 +441,20 @@ window.WorldApp = (() => {
 
     const center = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : fallbackCityCenter(places);
     if (center) {
+      const fromPhoton = await photonReverseEnglishLabel(center.lat, center.lng);
+      if (fromPhoton) return fromPhoton;
       const fromApi = await fetchGeocodeEnglishLabel(center.lat, center.lng, city, countryName);
       if (fromApi) return fromApi;
     }
 
     const photon = await photonCityLookup(city, countryName, places);
     if (photon?.labelEn) {
-      if (isLatinLabel(photon.labelEn)) return photon.labelEn;
-      const latin = extractLatinFromMixed(photon.labelEn);
+      const label = normalizeCityLabel(photon.labelEn);
+      if (isLatinLabel(label)) return label;
+      const latin = extractLatinFromMixed(label);
       if (latin) return latin;
     }
-    if (isLatinLabel(city)) return city;
+    if (isLatinLabel(city)) return normalizeCityLabel(city) || city;
     return "";
   }
 
@@ -518,7 +559,7 @@ window.WorldApp = (() => {
     }
 
     if (!pending.length) return;
-    const batchSize = 1;
+    const batchSize = 4;
     for (let i = 0; i < pending.length; i += batchSize) {
       if (gen !== cityCenterResolveGen) return;
       const batch = pending.slice(i, i + batchSize);
@@ -548,7 +589,7 @@ window.WorldApp = (() => {
       }
       if (WorldPlanner?.isOpen?.()) WorldPlanner.render?.(state);
       if (selectedCountry) renderCountryPanel();
-      if (i + batchSize < pending.length) await new Promise((r) => setTimeout(r, 1100));
+      if (i + batchSize < pending.length) await new Promise((r) => setTimeout(r, 300));
     }
   }
 
@@ -576,7 +617,7 @@ window.WorldApp = (() => {
       pins.push({
         countryId: g.countryId,
         city: g.city,
-        label: cityDisplayLabel(g.countryId, g.city),
+        label: cityDisplayLabel(g.countryId, g.city) || g.city,
         lat: center.lat,
         lng: center.lng,
         placeCount: g.places.length,
@@ -1252,7 +1293,7 @@ window.WorldApp = (() => {
   return {
     start, ready: () => ready, getState, setState, cloneState, persist, persistNav, persistPlanner, refresh, toast,
     getUser: () => user,
-    selectCountry, selectCityInCountry, showDayPlacesOnCountry, cityDisplayLabel, setOverlayPanel,
+    selectCountry, selectCityInCountry, showDayPlacesOnCountry, cityDisplayLabel, setOverlayPanel, resolveCityLabels: () => resolveCityCenters(),
     get selectedCountry() { return selectedCountry; },
   };
 })();

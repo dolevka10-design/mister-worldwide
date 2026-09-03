@@ -742,23 +742,17 @@ window.WorldGlobe = (() => {
     el.className = "globe-city-pin";
     el.dataset.countryId = d.countryId;
     el.dataset.city = d.city;
-    const label = String(d.label || "").trim();
-    const hasLabel = label.length > 0;
-    if (!hasLabel) el.classList.add("globe-city-pin--pending");
+    const label = String(d.label || d.city || "").trim();
     const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-    el.title = hasLabel ? `${label} (${d.placeCount} places)` : `${d.placeCount} places`;
-    el.setAttribute("aria-label", hasLabel ? `${label}, ${d.placeCount} places` : `${d.placeCount} places`);
+    el.title = `${label} (${d.placeCount} places)`;
+    el.setAttribute("aria-label", `${label}, ${d.placeCount} places`);
     const shortCity = label.length > 14 ? `${label.slice(0, 12)}…` : label;
-    el.innerHTML = hasLabel
-      ? `
+    el.innerHTML = `
       <span class="globe-city-dot" aria-hidden="true"></span>
       <span class="globe-city-stack">
         <span class="globe-city-label">${esc(shortCity)}</span>
         <span class="globe-city-count">${d.placeCount}</span>
-      </span>`
-      : `
-      <span class="globe-city-dot" aria-hidden="true"></span>
-      <span class="globe-city-count globe-city-count--solo">${d.placeCount}</span>`;
+      </span>`;
     bindPinTap(el, () => selectCity(d.countryId, d.city));
     return el;
   }
@@ -919,6 +913,7 @@ window.WorldGlobe = (() => {
   function setPinViewMode(mode) {
     pinViewMode = mode === "city" ? "city" : "country";
     applyPinView();
+    if (pinViewMode === "city") WorldApp.resolveCityLabels?.();
   }
 
   function restoreCountryPins() {
