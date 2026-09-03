@@ -40,13 +40,10 @@ window.WorldCloud = (() => {
   let googleSignInFlight = null;
 
   function preferGoogleRedirect() {
-    const ua = navigator.userAgent || "";
-    const isIOS = /iPad|iPhone|iPod/i.test(ua)
-      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    if (isIOS) return true;
-    if (/Android/i.test(ua)) return true;
-    // Popups are unreliable in embedded / storage-partitioned browsers.
+    // Full-page redirect loses session state on iOS Safari; popup is more reliable there.
     if (window.self !== window.top) return true;
+    const ua = navigator.userAgent || "";
+    if (/Android/i.test(ua) && /\bwv\b/i.test(ua)) return true;
     return false;
   }
 
@@ -135,15 +132,16 @@ window.WorldCloud = (() => {
       await waitForAuthReady();
       signedInUser = auth.currentUser;
     }
+    if (!signedInUser && (hadRedirect || /apiKey=|authUser=/.test(location.hash || ""))) {
+      await new Promise((r) => setTimeout(r, 600));
+      await waitForAuthReady();
+      signedInUser = auth.currentUser;
+    }
     if (signedInUser) {
       cleanStaleAuthUrl();
       return enforceAllowlist(signedInUser);
     }
-    if (hadRedirect) {
-      const err = new Error("Google sign-in did not complete. Tap Continue with Google once more.");
-      err.code = "auth/redirect-incomplete";
-      throw err;
-    }
+    if (hadRedirect) cleanStaleAuthUrl();
     return null;
   }
 

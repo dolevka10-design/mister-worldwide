@@ -1153,11 +1153,8 @@ window.WorldApp = (() => {
 
   function authErrText(e, fallback) {
     const msg = e?.message || fallback;
-    if (e?.code === "auth/redirect-incomplete") {
-      return msg;
-    }
     if (e?.code === "auth/cancelled-popup-request") {
-      return "Google sign-in is already opening — wait a moment, then tap once.";
+      return "Google sign-in is already opening — wait for the Google window, then tap once.";
     }
     if (e?.code === "auth/popup-closed-by-user") {
       return "Google sign-in was cancelled.";
