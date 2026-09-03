@@ -284,18 +284,12 @@ window.WorldPlanner = (() => {
     return trip?.dayListMode === "timeline" ? "timeline" : "category";
   }
 
-  function centerActiveDayChip({ smooth = false } = {}) {
-    const chips = document.querySelector(".day-nav-chips");
-    const chip = chips?.querySelector(".day-nav-chip.active");
-    if (!chips || !chip) return;
-    const max = Math.max(0, chips.scrollWidth - chips.clientWidth);
-    const target = chip.offsetLeft - (chips.clientWidth - chip.offsetWidth) / 2;
-    chips.scrollTo({ left: Math.max(0, Math.min(target, max)), behavior: smooth ? "smooth" : "auto" });
-    updateDayChipArrows();
-  }
-
   function scrollActiveDayChip() {
-    requestAnimationFrame(() => centerActiveDayChip({ smooth: false }));
+    requestAnimationFrame(() => {
+      const chip = document.querySelector(".day-nav-chip.active");
+      chip?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+      updateDayChipArrows();
+    });
   }
 
   function dayChipScrollStep(el) {
@@ -1357,18 +1351,14 @@ window.WorldPlanner = (() => {
     const state = WorldApp.getState();
     const trip = getActiveTrip(state);
     if (!trip) return;
-    const next = clampDayNum(trip, dayNum);
-    if (next === activeDayNum && document.getElementById("planner-day-body")) return;
-    activeDayNum = next;
+    activeDayNum = clampDayNum(trip, dayNum);
     trip.activeDayNum = activeDayNum;
     ensurePlanner(state).activeDayNum = activeDayNum;
+    lastScroll = 0;
     rememberNav(state);
     try { WorldApp.persistNav?.(); } catch { /* */ }
-    if (document.getElementById("day-chips-strip") && document.getElementById("planner-day-body")) {
-      updateDayView(state, trip, activeDayNum);
-      return;
-    }
     render(state);
+    scrollPlannerToDay();
     scrollActiveDayChip();
   }
 
@@ -1675,23 +1665,7 @@ window.WorldPlanner = (() => {
     </div>`;
   }
 
-  function renderDayChipsStrip(trip, dayNum) {
-    return `
-        <div class="day-chips-strip" id="day-chips-strip">
-          <button type="button" class="day-scroll-btn" data-act="day-scroll" data-dir="left" aria-label="Scroll days left">‹</button>
-          <div class="day-nav-chips" role="tablist" aria-label="Day chips">
-            ${(trip.days || []).map((d, i) => {
-              const n = i + 1;
-              return `<button type="button" role="tab" class="day-nav-chip ${n === dayNum ? "active" : ""}" data-act="day-go" data-day="${n}" aria-selected="${n === dayNum}">
-                ${d.date ? esc(fmtDate(d.date)) : `D${n}`}
-              </button>`;
-            }).join("")}
-          </div>
-          <button type="button" class="day-scroll-btn" data-act="day-scroll" data-dir="right" aria-label="Scroll days right">›</button>
-        </div>`;
-  }
-
-  function renderDayPageBody(state, trip, dayNum) {
+  function renderDayPage(state, trip, dayNum) {
     const day = trip.days?.[dayNum - 1];
     if (!day) return '<p class="muted">No days in this trip yet.</p>';
     const seg = segmentForDay(trip, dayNum);
@@ -1708,10 +1682,23 @@ window.WorldPlanner = (() => {
     const total = trip.days?.length || 0;
     const listMode = dayListMode(trip);
     return `
+      <section class="day-page" id="planner-day-page">
         <header class="day-page-head card">
           <p class="day-page-kicker">Day ${dayNum} of ${total}${day.importDay && day.importDay !== dayNum ? ` <span class="muted">(itinerary day ${esc(String(day.importDay))})</span>` : ""}</p>
           <h2 class="day-page-title">${esc(headline)}</h2>
         </header>
+        <div class="day-chips-strip">
+          <button type="button" class="day-scroll-btn" data-act="day-scroll" data-dir="left" aria-label="Scroll days left">‹</button>
+          <div class="day-nav-chips" role="tablist" aria-label="Day chips">
+            ${(trip.days || []).map((d, i) => {
+              const n = i + 1;
+              return `<button type="button" role="tab" class="day-nav-chip ${n === dayNum ? "active" : ""}" data-act="day-go" data-day="${n}" aria-selected="${n === dayNum}">
+                ${d.date ? esc(fmtDate(d.date)) : `D${n}`}
+              </button>`;
+            }).join("")}
+          </div>
+          <button type="button" class="day-scroll-btn" data-act="day-scroll" data-dir="right" aria-label="Scroll days right">›</button>
+        </div>
         <div class="day-layout-bar">
           <span class="muted day-layout-label">View</span>
           <div class="day-layout-toggle" role="group" aria-label="Day list layout">
@@ -1725,32 +1712,8 @@ window.WorldPlanner = (() => {
         <div class="day-sections">
           ${renderDayActivities(state, trip, day, dayNum)}
         </div>
-        ${renderDayAddForm(day, seg)}`;
-  }
-
-  function renderDayPage(state, trip, dayNum) {
-    const day = trip.days?.[dayNum - 1];
-    if (!day) return '<p class="muted">No days in this trip yet.</p>';
-    return `
-      <section class="day-page" id="planner-day-page">
-        ${renderDayChipsStrip(trip, dayNum)}
-        <div id="planner-day-body">
-          ${renderDayPageBody(state, trip, dayNum)}
-        </div>
+        ${renderDayAddForm(day, seg)}
       </section>`;
-  }
-
-  function updateDayView(state, trip, dayNum) {
-    document.querySelectorAll(".day-nav-chip").forEach((btn) => {
-      const n = Number(btn.dataset.day);
-      const on = n === dayNum;
-      btn.classList.toggle("active", on);
-      btn.setAttribute("aria-selected", on ? "true" : "false");
-    });
-    const host = document.getElementById("planner-day-body");
-    if (host) host.innerHTML = renderDayPageBody(state, trip, dayNum);
-    centerActiveDayChip({ smooth: false });
-    wireDayChipScroll();
   }
 
   function renderLocationSection(state, trip, seg, idx) {
@@ -1994,7 +1957,7 @@ window.WorldPlanner = (() => {
       const strip = actEl.closest(".day-chips-strip");
       const chips = strip?.querySelector(".day-nav-chips");
       const dir = actEl.dataset.dir === "left" ? -1 : 1;
-      chips?.scrollBy({ left: dir * dayChipScrollStep(chips), behavior: "auto" });
+      chips?.scrollBy({ left: dir * dayChipScrollStep(chips), behavior: "smooth" });
       setTimeout(() => updateDayChipArrows(strip), 280);
       return;
     }
@@ -2048,10 +2011,6 @@ window.WorldPlanner = (() => {
       if (!trip) return;
       trip.dayListMode = actEl.dataset.layout === "timeline" ? "timeline" : "category";
       try { WorldApp.persistNav?.(); } catch { /* */ }
-      if (document.getElementById("planner-day-body")) {
-        updateDayView(state, trip, activeDayNum);
-        return;
-      }
       return render(state);
     }
     if (act === "activity-detail") {
