@@ -38,6 +38,22 @@ window.WorldCloud = (() => {
 
   const APP_NAME = "misterWorldwide";
   const REDIRECT_PENDING_KEY = "mw-google-redirect-pending";
+  let googleSignInFlight = null;
+
+  function preferGoogleRedirect() {
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPad|iPhone|iPod/i.test(ua)
+      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIOS) return true;
+    if (/Android/i.test(ua)) return true;
+    // Popups are unreliable in embedded / storage-partitioned browsers.
+    if (window.self !== window.top) return true;
+    return false;
+  }
+
+  function isGoogleSignInBusy() {
+    return !!googleSignInFlight;
+  }
 
   function initFirebase() {
     if (!configured || typeof firebase === "undefined") return { ok: false };
@@ -126,11 +142,28 @@ window.WorldCloud = (() => {
   }
 
   async function signInWithGoogle() {
+    if (googleSignInFlight) return googleSignInFlight;
+    googleSignInFlight = signInWithGoogleInner().finally(() => { googleSignInFlight = null; });
+    return googleSignInFlight;
+  }
+
+  async function signInWithGoogleInner() {
     await ensureAuthPersistence();
     const provider = googleAuthProvider();
+    if (preferGoogleRedirect()) {
+      try { sessionStorage.setItem(REDIRECT_PENDING_KEY, "1"); } catch { /* */ }
+      await auth.signInWithRedirect(provider);
+      return null;
+    }
     try {
       return enforceAllowlist((await auth.signInWithPopup(provider)).user);
     } catch (e) {
+      if (e?.code === "auth/popup-closed-by-user") throw e;
+      if (e?.code === "auth/cancelled-popup-request") {
+        const err = new Error("Google sign-in is already opening — wait for the window, then try again.");
+        err.code = "auth/cancelled-popup-request";
+        throw err;
+      }
       if (!shouldFallbackToRedirect(e)) throw e;
       try { sessionStorage.setItem(REDIRECT_PENDING_KEY, "1"); } catch { /* */ }
       await auth.signInWithRedirect(provider);
@@ -276,7 +309,7 @@ window.WorldCloud = (() => {
   }
 
   return {
-    configured, initFirebase, completeRedirectSignIn, isAllowedEmail, isQuotaError, isQuotaPaused, resumeQuota,
+    configured, initFirebase, completeRedirectSignIn, isGoogleSignInBusy, isAllowedEmail, isQuotaError, isQuotaPaused, resumeQuota,
     signIn, signUp, signInWithGoogle, signOut, onAuthStateChanged,
     loadFromCloud, scheduleSave, flushSave, listenCloud, isApplyingRemote,
     saveAssistantChat, loadAssistantChat,

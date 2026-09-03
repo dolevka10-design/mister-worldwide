@@ -149,6 +149,10 @@ html, body {
   border: none;
   font-weight: 600;
 }
+.btn-google:disabled {
+  opacity: 0.72;
+  cursor: wait;
+}
 
 .field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.75rem; }
 .field label { font-size: 0.82rem; color: var(--muted); }

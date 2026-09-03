@@ -1153,6 +1153,12 @@ window.WorldApp = (() => {
 
   function authErrText(e, fallback) {
     const msg = e?.message || fallback;
+    if (e?.code === "auth/cancelled-popup-request") {
+      return "Google sign-in is already opening — wait a moment, then tap once.";
+    }
+    if (e?.code === "auth/popup-closed-by-user") {
+      return "Google sign-in was cancelled.";
+    }
     if (/missing initial state/i.test(msg)) {
       return "Google sign-in was interrupted. Close other tabs for this site, avoid Private Browsing, then tap Continue with Google again.";
     }
@@ -1164,19 +1170,32 @@ window.WorldApp = (() => {
 
   function bindAuth() {
     const errEl = $("auth-error");
+    const googleBtn = $("btn-google");
     const setErr = (msg) => {
       if (!errEl) return;
       errEl.hidden = !msg;
       errEl.textContent = msg || "";
     };
+    const setGoogleBusy = (busy) => {
+      if (!googleBtn) return;
+      googleBtn.disabled = busy;
+      googleBtn.setAttribute("aria-busy", busy ? "true" : "false");
+      googleBtn.textContent = busy ? "Opening Google…" : "Continue with Google";
+    };
 
     $("btn-google")?.addEventListener("click", async () => {
+      if (googleBtn?.disabled || WorldCloud.isGoogleSignInBusy?.()) return;
       setErr("");
+      setGoogleBusy(true);
       try {
         const u = await WorldCloud.signInWithGoogle();
         if (u === null) return; // redirect in progress
+        setGoogleBusy(false);
       }
-      catch (e) { setErr(authErrText(e, "Google sign-in failed")); }
+      catch (e) {
+        setGoogleBusy(false);
+        setErr(authErrText(e, "Google sign-in failed"));
+      }
     });
 
     $("auth-form")?.addEventListener("submit", async (e) => {
