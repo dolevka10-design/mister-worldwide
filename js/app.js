@@ -18,8 +18,7 @@ window.WorldApp = (() => {
   let placeIdFilter = null;
   let dayPanelLabel = "";
   let placeIdOrder = [];
-  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v5";
-  const NOMINATIM_UA = "MisterWorldwide/1.0 (travel-globe; contact: app@mister-worldwide.local)";
+  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v6";
   const KNOWN_CITY_CENTERS = {
     "united-states|Brooklyn": { lat: 40.6782, lng: -73.9442 },
     "united-states|Manhattan": { lat: 40.7831, lng: -73.9712 },
@@ -263,6 +262,7 @@ window.WorldApp = (() => {
     try {
       const raw =
         localStorage.getItem(CITY_CENTER_KEY) ||
+        localStorage.getItem("mister-worldwide-city-centers-v5") ||
         localStorage.getItem("mister-worldwide-city-centers-v4") ||
         localStorage.getItem("mister-worldwide-city-centers-v3");
       if (!raw) return;
@@ -342,33 +342,6 @@ window.WorldApp = (() => {
     return Math.hypot(dLat, dLng) <= maxDeg;
   }
 
-  function pickEnglishPlaceName(namedetails, address, displayName, fallbackName) {
-    const nd = namedetails || {};
-    const addr = address || {};
-    const candidates = [
-      nd["name:en"],
-      nd["name:international"],
-      nd["official_name:en"],
-      addr.city,
-      addr.town,
-      addr.municipality,
-      addr.village,
-      addr.suburb,
-      addr.county,
-      nd.name,
-      displayName?.split(",")?.[0]?.trim(),
-      fallbackName,
-    ];
-    for (const c of candidates) {
-      const s = String(c || "").trim();
-      if (!s) continue;
-      if (isLatinLabel(s)) return s;
-      const latin = extractLatinFromMixed(s);
-      if (latin) return latin;
-    }
-    return "";
-  }
-
   function cityDisplayLabel(countryId, city) {
     const key = cityCenterKey(countryId, city);
     const cached = cityCenterCache.get(key);
@@ -376,9 +349,7 @@ window.WorldApp = (() => {
     if (isLatinLabel(city)) return city;
     const mixed = extractLatinFromMixed(city);
     if (mixed) return mixed;
-    const cachedLatin = extractLatinFromMixed(cached?.labelEn);
-    if (cachedLatin) return cachedLatin;
-    return city;
+    return "";
   }
 
   function needsEnglishCityLabel(existing, city) {
@@ -388,65 +359,36 @@ window.WorldApp = (() => {
     return false;
   }
 
-  async function nominatimReverseEnglishLabel(lat, lng) {
+  async function fetchGeocodeEnglishLabel(lat, lng, city, countryName) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
-    const url =
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}` +
-      `&lon=${encodeURIComponent(lng)}&zoom=11&accept-language=en&namedetails=1&addressdetails=1`;
-    const res = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": NOMINATIM_UA },
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lng: String(lng),
     });
-    if (!res.ok) return "";
-    const data = await res.json();
-    return pickEnglishPlaceName(data?.namedetails, data?.address, data?.display_name, data?.name);
-  }
-
-  async function nominatimSearchEnglishLabel(city, countryName, lat, lng) {
-    const q = geocodeQueryFor(city, countryName, []);
-    if (!q) return "";
-    const url =
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}` +
-      `&limit=5&accept-language=en&namedetails=1&addressdetails=1`;
-    const res = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": NOMINATIM_UA },
-    });
-    if (!res.ok) return "";
-    const rows = await res.json();
-    if (!Array.isArray(rows) || !rows.length) return "";
-    let best = null;
-    let bestScore = -Infinity;
-    for (const row of rows) {
-      const rLat = Number(row.lat);
-      const rLng = Number(row.lon);
-      if (!Number.isFinite(rLat) || !Number.isFinite(rLng)) continue;
-      let score = 0;
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        const dist = clusterDistance({ lat: rLat, lng: rLng }, { lat, lng });
-        score += Math.max(0, 40 - dist * 4);
-      }
-      const label = pickEnglishPlaceName(row.namedetails, row.address, row.display_name, row.name);
-      if (label) score += 20;
-      if (score > bestScore) {
-        bestScore = score;
-        best = row;
-      }
+    if (city) params.set("city", city);
+    if (countryName) params.set("country", countryName);
+    try {
+      const res = await fetch(`/api/geocode/label?${params}`);
+      if (!res.ok) return "";
+      const data = await res.json();
+      const label = String(data?.labelEn || "").trim();
+      if (label && isLatinLabel(label)) return label;
+      return extractLatinFromMixed(label);
+    } catch {
+      return "";
     }
-    if (!best) return "";
-    return pickEnglishPlaceName(best.namedetails, best.address, best.display_name, best.name);
   }
 
   async function resolveEnglishCityLabel(city, countryName, lat, lng, places) {
-    const fromMixed = extractLatinFromMixed(city);
     if (isLatinLabel(city)) return city;
+    const fromMixed = extractLatinFromMixed(city);
     if (fromMixed) return fromMixed;
 
     const center = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : fallbackCityCenter(places);
     if (center) {
-      const reverse = await nominatimReverseEnglishLabel(center.lat, center.lng);
-      if (reverse) return reverse;
+      const fromApi = await fetchGeocodeEnglishLabel(center.lat, center.lng, city, countryName);
+      if (fromApi) return fromApi;
     }
-    const search = await nominatimSearchEnglishLabel(city, countryName, center?.lat, center?.lng);
-    if (search) return search;
 
     const photon = await photonCityLookup(city, countryName, places);
     if (photon?.labelEn) {
@@ -454,7 +396,7 @@ window.WorldApp = (() => {
       const latin = extractLatinFromMixed(photon.labelEn);
       if (latin) return latin;
     }
-    return fromMixed || city;
+    return "";
   }
 
   function rankPhotonCityFeatures(features, city, countryName, places) {
@@ -516,7 +458,7 @@ window.WorldApp = (() => {
     const fallback = fallbackCityCenter(places);
     if (known) {
       const labelEn = isLatinLabel(city) ? city : await resolveEnglishCityLabel(city, countryName, known.lat, known.lng, places);
-      return { ...known, labelEn: labelEn || city };
+      return { ...known, labelEn: labelEn || "" };
     }
     try {
       const hit = await photonCityLookup(city, countryName, places);
@@ -524,7 +466,7 @@ window.WorldApp = (() => {
       const lng = hit?.lng ?? fallback?.lng;
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
       const labelEn = await resolveEnglishCityLabel(city, countryName, lat, lng, places);
-      return { lat, lng, labelEn: labelEn || city };
+      return { lat, lng, labelEn: labelEn || "" };
     } catch {
       return null;
     }
@@ -549,7 +491,7 @@ window.WorldApp = (() => {
       const known = knownCityCenter(g.countryId, g.city);
       const existing = cityCenterCache.get(key);
       if (known && !existing) {
-        cityCenterCache.set(key, { ...known, labelEn: g.city });
+        cityCenterCache.set(key, { ...known, labelEn: isLatinLabel(g.city) ? g.city : "" });
         continue;
       }
       const needsCoords = !Number.isFinite(existing?.lat) && !known;
@@ -578,7 +520,7 @@ window.WorldApp = (() => {
           }
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
           const labelEn = await resolveEnglishCityLabel(g.city, countryName, lat, lng, g.places);
-          cityCenterCache.set(key, { lat, lng, labelEn: labelEn || g.city });
+          cityCenterCache.set(key, { lat, lng, labelEn: labelEn || "" });
         })
       );
       if (gen !== cityCenterResolveGen) return;
