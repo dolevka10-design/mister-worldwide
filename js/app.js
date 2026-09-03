@@ -1171,30 +1171,25 @@ window.WorldApp = (() => {
   function bindAuth() {
     const errEl = $("auth-error");
     const googleBtn = $("btn-google");
+    let googleBusy = false;
     const setErr = (msg) => {
       if (!errEl) return;
       errEl.hidden = !msg;
       errEl.textContent = msg || "";
     };
-    const setGoogleBusy = (busy) => {
-      if (!googleBtn) return;
-      googleBtn.disabled = busy;
-      googleBtn.setAttribute("aria-busy", busy ? "true" : "false");
-      googleBtn.textContent = busy ? "Opening Google…" : "Continue with Google";
-    };
 
     $("btn-google")?.addEventListener("click", async () => {
-      if (googleBtn?.disabled || WorldCloud.isGoogleSignInBusy?.()) return;
+      if (googleBusy) return;
+      googleBusy = true;
+      if (googleBtn) googleBtn.disabled = true;
       setErr("");
-      setGoogleBusy(true);
       try {
-        const u = await WorldCloud.signInWithGoogle();
-        if (u === null) return; // redirect in progress
-        setGoogleBusy(false);
-      }
-      catch (e) {
-        setGoogleBusy(false);
+        await WorldCloud.signInWithGoogle();
+      } catch (e) {
         setErr(authErrText(e, "Google sign-in failed"));
+      } finally {
+        googleBusy = false;
+        if (googleBtn) googleBtn.disabled = false;
       }
     });
 
@@ -1306,18 +1301,6 @@ window.WorldApp = (() => {
         return;
       }
 
-      try {
-        const redirectUser = await WorldCloud.completeRedirectSignIn();
-        if (redirectUser) await onUser(redirectUser);
-      } catch (e) {
-        showAuth(true);
-        const errEl = $("auth-error");
-        if (errEl) {
-          errEl.hidden = false;
-          errEl.textContent = authErrText(e, "Google sign-in failed");
-        }
-      }
-
       WorldCloud.onAuthStateChanged(async (u, err) => {
         if (err) {
           const quota = WorldCloud.isQuotaError?.(err);
@@ -1326,7 +1309,6 @@ window.WorldApp = (() => {
             quota ? "warn" : "error"
           );
         }
-        if (u && u.uid === user?.uid) return;
         await onUser(u);
       });
     } catch (e) {

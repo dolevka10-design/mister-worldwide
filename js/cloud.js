@@ -36,119 +36,14 @@ window.WorldCloud = (() => {
     return `worldData/${uid}`;
   }
 
-  const REDIRECT_PENDING_KEY = "mw-google-redirect-pending";
   let googleSignInFlight = null;
-
-  function preferGoogleRedirect() {
-    // Full-page redirect loses session state on iOS Safari; popup is more reliable there.
-    if (window.self !== window.top) return true;
-    const ua = navigator.userAgent || "";
-    if (/Android/i.test(ua) && /\bwv\b/i.test(ua)) return true;
-    return false;
-  }
-
-  function isGoogleSignInBusy() {
-    return !!googleSignInFlight;
-  }
 
   function initFirebase() {
     if (!configured || typeof firebase === "undefined") return { ok: false };
-    let app = null;
-    if (!firebase.apps.length) {
-      app = firebase.initializeApp(cfg);
-    } else {
-      app = firebase.apps.find((a) => a.options?.projectId === cfg.projectId) || firebase.app();
-      if (app.options?.projectId !== cfg.projectId) {
-        try { app.delete(); } catch { /* */ }
-        app = firebase.initializeApp(cfg);
-      }
-    }
-    auth = firebase.auth(app);
-    db = firebase.firestore(app);
+    if (!firebase.apps.length) firebase.initializeApp(cfg);
+    auth = firebase.auth();
+    db = firebase.firestore();
     return { ok: true };
-  }
-
-  async function waitForAuthReady() {
-    if (!auth) return null;
-    if (auth.currentUser) return auth.currentUser;
-    if (typeof auth.authStateReady === "function") {
-      await auth.authStateReady();
-      return auth.currentUser;
-    }
-    return new Promise((resolve) => {
-      const unsub = auth.onAuthStateChanged((u) => {
-        unsub();
-        resolve(u);
-      });
-    });
-  }
-
-  async function ensureAuthPersistence() {
-    if (!auth?.setPersistence) return;
-    try {
-      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-    } catch (e) {
-      console.warn("Auth persistence fallback", e);
-    }
-  }
-
-  function googleAuthProvider() {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" });
-    return provider;
-  }
-
-  function isRedirectRecoverableError(e) {
-    const msg = String(e?.message || e?.code || "");
-    return /missing initial state|auth\/no-auth-event/i.test(msg);
-  }
-
-  function cleanStaleAuthUrl() {
-    const hash = location.hash || "";
-    if (!/apiKey=|authUser=|error=/.test(hash)) return;
-    try {
-      history.replaceState(null, "", location.pathname + location.search);
-    } catch { /* */ }
-  }
-
-  async function completeRedirectSignIn() {
-    if (!auth) return null;
-    await ensureAuthPersistence();
-    const hadRedirect = (() => {
-      try { return sessionStorage.getItem(REDIRECT_PENDING_KEY) === "1"; } catch { return false; }
-    })();
-    let signedInUser = null;
-    try {
-      const result = await auth.getRedirectResult();
-      if (result?.user) signedInUser = result.user;
-    } catch (e) {
-      cleanStaleAuthUrl();
-      if (!isRedirectRecoverableError(e)) throw e;
-      console.warn("Redirect sign-in state missing; checking persisted session", e);
-    } finally {
-      try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* */ }
-    }
-    if (!signedInUser) {
-      await waitForAuthReady();
-      signedInUser = auth.currentUser;
-    }
-    if (!signedInUser && (hadRedirect || /apiKey=|authUser=/.test(location.hash || ""))) {
-      await new Promise((r) => setTimeout(r, 600));
-      await waitForAuthReady();
-      signedInUser = auth.currentUser;
-    }
-    if (signedInUser) {
-      cleanStaleAuthUrl();
-      return enforceAllowlist(signedInUser);
-    }
-    if (hadRedirect) cleanStaleAuthUrl();
-    return null;
-  }
-
-  function shouldFallbackToRedirect(e) {
-    const code = e?.code || "";
-    return code === "auth/popup-blocked"
-      || code === "auth/operation-not-supported-in-this-environment";
   }
 
   async function rejectUnauthorizedUser(user) {
@@ -179,32 +74,12 @@ window.WorldCloud = (() => {
 
   async function signInWithGoogle() {
     if (googleSignInFlight) return googleSignInFlight;
-    googleSignInFlight = signInWithGoogleInner().finally(() => { googleSignInFlight = null; });
-    return googleSignInFlight;
-  }
-
-  async function signInWithGoogleInner() {
-    await ensureAuthPersistence();
-    const provider = googleAuthProvider();
-    if (preferGoogleRedirect()) {
-      try { sessionStorage.setItem(REDIRECT_PENDING_KEY, "1"); } catch { /* */ }
-      await auth.signInWithRedirect(provider);
-      return null;
-    }
-    try {
+    googleSignInFlight = (async () => {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
       return enforceAllowlist((await auth.signInWithPopup(provider)).user);
-    } catch (e) {
-      if (e?.code === "auth/popup-closed-by-user") throw e;
-      if (e?.code === "auth/cancelled-popup-request") {
-        const err = new Error("Google sign-in is already opening — wait for the window, then try again.");
-        err.code = "auth/cancelled-popup-request";
-        throw err;
-      }
-      if (!shouldFallbackToRedirect(e)) throw e;
-      try { sessionStorage.setItem(REDIRECT_PENDING_KEY, "1"); } catch { /* */ }
-      await auth.signInWithRedirect(provider);
-      return null;
-    }
+    })().finally(() => { googleSignInFlight = null; });
+    return googleSignInFlight;
   }
 
   async function signOut() {
@@ -213,11 +88,13 @@ window.WorldCloud = (() => {
 
   function onAuthStateChanged(cb) {
     if (!auth) return () => {};
-    return auth.onAuthStateChanged((user) => {
-      Promise.resolve()
-        .then(async () => (user ? enforceAllowlist(user) : null))
-        .then((u) => cb(u))
-        .catch((e) => cb(null, e));
+    return auth.onAuthStateChanged(async (user) => {
+      try {
+        if (user) user = await enforceAllowlist(user);
+        cb(user);
+      } catch (e) {
+        cb(null, e);
+      }
     });
   }
 
@@ -343,7 +220,7 @@ window.WorldCloud = (() => {
   }
 
   return {
-    configured, initFirebase, completeRedirectSignIn, isGoogleSignInBusy, isAllowedEmail, isQuotaError, isQuotaPaused, resumeQuota,
+    configured, initFirebase, isAllowedEmail, isQuotaError, isQuotaPaused, resumeQuota,
     signIn, signUp, signInWithGoogle, signOut, onAuthStateChanged,
     loadFromCloud, scheduleSave, flushSave, listenCloud, isApplyingRemote,
     saveAssistantChat, loadAssistantChat,
