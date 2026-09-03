@@ -73,6 +73,8 @@ function normalizeEnglishLabel(label) {
     .replace(/\s+(District|Municipality|Subdistrict|County)$/i, "")
     .trim();
 }
+
+function isTooBroadLabel(label, address) {
   const l = String(label || "").toLowerCase();
   if (/^(north|south|east|west|central)\s+region$/.test(l)) return true;
   if (/\b(province|prefecture|oblast|governorate)\b/.test(l)) return true;
