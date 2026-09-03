@@ -17,6 +17,13 @@ function json(body, status = 200) {
   });
 }
 
+function isMeaningfulCityLabel(text) {
+  const s = String(text || "").trim();
+  if (!s || s.length < 2) return false;
+  if (/^\d+$/.test(s)) return false;
+  return true;
+}
+
 function isLatinLabel(text) {
   const s = String(text || "").trim();
   if (!s) return false;
@@ -50,9 +57,9 @@ function pickEnglishPlaceName(namedetails, address, displayName) {
   ];
   for (const c of cityLevel) {
     const s = String(c || "").trim();
-    if (s && isLatinLabel(s)) return s;
+    if (s && isLatinLabel(s) && isMeaningfulCityLabel(s)) return s;
     const latin = extractLatinFromMixed(s);
-    if (latin) return latin;
+    if (latin && isMeaningfulCityLabel(latin)) return latin;
   }
   const parts = String(displayName || "")
     .split(",")
@@ -61,9 +68,9 @@ function pickEnglishPlaceName(namedetails, address, displayName) {
   for (let i = parts.length - 2; i >= 0; i--) {
     const s = parts[i];
     if (!s || /^\d{2,}$/.test(s)) continue;
-    if (isLatinLabel(s)) return s;
+    if (isLatinLabel(s) && isMeaningfulCityLabel(s)) return s;
     const latin = extractLatinFromMixed(s);
-    if (latin) return latin;
+    if (latin && isMeaningfulCityLabel(latin)) return latin;
   }
   return "";
 }

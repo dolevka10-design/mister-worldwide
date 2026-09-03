@@ -547,6 +547,11 @@ html, body {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
   transform: translate(-50%, -50%);
 }
+.globe-city-dot--pending {
+  width: 7px;
+  height: 7px;
+  opacity: 0.75;
+}
 .globe-city-stack {
   position: absolute;
   left: 50%;
@@ -583,13 +588,6 @@ html, body {
   border-radius: 999px;
   padding: 0.02rem 0.3rem;
   line-height: 1.2;
-}
-.globe-city-pin--pending .globe-city-count--solo {
-  position: absolute;
-  left: 50%;
-  bottom: calc(50% + 6px);
-  transform: translateX(-50%);
-  pointer-events: none;
 }
 
 .globe-toolbar { top: 0.4rem; right: 0.4rem; }
