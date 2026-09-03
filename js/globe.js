@@ -742,13 +742,15 @@ window.WorldGlobe = (() => {
     el.className = "globe-city-pin";
     el.dataset.countryId = d.countryId;
     el.dataset.city = d.city;
-    el.title = `${d.city} (${d.placeCount} places)`;
-    el.setAttribute("aria-label", `${d.city}, ${d.placeCount} places`);
-    const shortCity = d.city.length > 14 ? `${d.city.slice(0, 12)}…` : d.city;
+    const label = String(d.label || d.city || "").trim();
+    const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    el.title = `${label} (${d.placeCount} places)`;
+    el.setAttribute("aria-label", `${label}, ${d.placeCount} places`);
+    const shortCity = label.length > 14 ? `${label.slice(0, 12)}…` : label;
     el.innerHTML = `
       <span class="globe-city-dot" aria-hidden="true"></span>
       <span class="globe-city-stack">
-        <span class="globe-city-label">${shortCity}</span>
+        <span class="globe-city-label">${esc(shortCity)}</span>
         <span class="globe-city-count">${d.placeCount}</span>
       </span>`;
     bindPinTap(el, () => selectCity(d.countryId, d.city));

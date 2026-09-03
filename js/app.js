@@ -18,7 +18,7 @@ window.WorldApp = (() => {
   let placeIdFilter = null;
   let dayPanelLabel = "";
   let placeIdOrder = [];
-  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v3";
+  const CITY_CENTER_KEY = "mister-worldwide-city-centers-v4";
   const KNOWN_CITY_CENTERS = {
     "united-states|Brooklyn": { lat: 40.6782, lng: -73.9442 },
     "united-states|Manhattan": { lat: 40.7831, lng: -73.9712 },
@@ -241,12 +241,19 @@ window.WorldApp = (() => {
 
   function loadCityCenterCache() {
     try {
-      const raw = localStorage.getItem(CITY_CENTER_KEY);
+      const raw =
+        localStorage.getItem(CITY_CENTER_KEY) ||
+        localStorage.getItem("mister-worldwide-city-centers-v3");
       if (!raw) return;
       const data = JSON.parse(raw);
       if (!data || typeof data !== "object") return;
       for (const [key, val] of Object.entries(data)) {
-        if (Number.isFinite(val?.lat) && Number.isFinite(val?.lng)) cityCenterCache.set(key, { lat: val.lat, lng: val.lng });
+        if (!Number.isFinite(val?.lat) || !Number.isFinite(val?.lng)) continue;
+        cityCenterCache.set(key, {
+          lat: val.lat,
+          lng: val.lng,
+          labelEn: String(val.labelEn || val.label || "").trim(),
+        });
       }
     } catch {
       /* ignore */
@@ -313,58 +320,77 @@ window.WorldApp = (() => {
     return Math.hypot(dLat, dLng) <= maxDeg;
   }
 
-  async function geocodeCityCenter(city, countryId, countryName, places) {
-    const known = knownCityCenter(countryId, city);
-    if (known) return known;
+  function cityDisplayLabel(countryId, city) {
+    const key = cityCenterKey(countryId, city);
+    const cached = cityCenterCache.get(key);
+    if (cached?.labelEn) return cached.labelEn;
+    return city;
+  }
+
+  function rankPhotonCityFeatures(features, city, countryName, places) {
+    const cityLower = city.toLowerCase();
+    const countryLower = String(countryName || "").toLowerCase();
+    const preferredTypes = new Set(["city", "town", "municipality", "borough", "locality", "suburb"]);
+    const ref = fallbackCityCenter(places);
+    return (features || [])
+      .map((f) => {
+        const [lng, lat] = f.geometry?.coordinates || [];
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        const p = f.properties || {};
+        const name = String(p.name || p.city || "").toLowerCase();
+        const labelEn = String(p.name || p.city || "").trim();
+        const type = String(p.type || p.osm_value || "").toLowerCase();
+        const featureCountry = String(p.country || "").toLowerCase();
+        const stateName = String(p.state || "").toLowerCase();
+        let score = 0;
+        if (name === cityLower) score += 10;
+        else if (name.startsWith(cityLower) || cityLower.startsWith(name)) score += 6;
+        else if (name.includes(cityLower) || cityLower.includes(name)) score += 3;
+        if (preferredTypes.has(type)) score += 5;
+        if (type === "borough" && cityLower === "brooklyn") score += 4;
+        if (countryLower && featureCountry === countryLower) score += 6;
+        else if (countryLower && featureCountry.includes(countryLower)) score += 2;
+        if (stateName.includes("new york") && cityLower === "brooklyn") score += 5;
+        return { lat, lng, score, labelEn };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)
+      .map((hit) => ({ ...hit, dist: clusterDistance(hit, ref) }));
+  }
+
+  async function photonCityLookup(city, countryName, places) {
     const q = geocodeQueryFor(city, countryName, places);
     if (!q) return null;
-    const ref = fallbackCityCenter(places);
-    try {
-      const res = await fetch(
-        `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=10&lang=en&osm_tag=place:city&osm_tag=place:town&osm_tag=place:municipality&osm_tag=place:borough&osm_tag=place:suburb`
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      const features = data?.features || [];
-      const cityLower = city.toLowerCase();
-      const countryLower = String(countryName || "").toLowerCase();
-      const preferredTypes = new Set(["city", "town", "municipality", "borough", "locality", "suburb"]);
-      const ranked = features
-        .map((f) => {
-          const [lng, lat] = f.geometry?.coordinates || [];
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-          const p = f.properties || {};
-          const name = String(p.name || p.city || "").toLowerCase();
-          const type = String(p.type || p.osm_value || "").toLowerCase();
-          const featureCountry = String(p.country || "").toLowerCase();
-          const stateName = String(p.state || "").toLowerCase();
-          let score = 0;
-          if (name === cityLower) score += 10;
-          else if (name.startsWith(cityLower) || cityLower.startsWith(name)) score += 6;
-          else if (name.includes(cityLower) || cityLower.includes(name)) score += 3;
-          if (preferredTypes.has(type)) score += 5;
-          if (type === "borough" && cityLower === "brooklyn") score += 4;
-          if (countryLower && featureCountry === countryLower) score += 6;
-          else if (countryLower && featureCountry.includes(countryLower)) score += 2;
-          if (stateName.includes("new york") && cityLower === "brooklyn") score += 5;
-          return { lat, lng, score };
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.score - a.score);
-      const valid = ranked.filter((hit) => hit.score >= 8 && nearPlaceCluster(hit, places, 3.5));
-      if (valid.length) {
-        valid.sort((a, b) => clusterDistance(a, ref) - clusterDistance(b, ref));
-        return { lat: valid[0].lat, lng: valid[0].lng };
-      }
-      for (const hit of ranked) {
-        if (hit.score < 8) continue;
-        if (!nearPlaceCluster(hit, places)) continue;
-        return { lat: hit.lat, lng: hit.lng };
-      }
-    } catch {
-      /* ignore */
+    const res = await fetch(
+      `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=10&lang=en&osm_tag=place:city&osm_tag=place:town&osm_tag=place:municipality&osm_tag=place:borough&osm_tag=place:suburb`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const ranked = rankPhotonCityFeatures(data?.features || [], city, countryName, places);
+    if (!ranked.length) return null;
+    const valid = ranked.filter((hit) => hit.score >= 8 && nearPlaceCluster(hit, places, 3.5));
+    if (valid.length) {
+      valid.sort((a, b) => a.dist - b.dist);
+      return valid[0];
     }
-    return null;
+    for (const hit of ranked) {
+      if (hit.score < 8) continue;
+      if (!nearPlaceCluster(hit, places)) continue;
+      return hit;
+    }
+    return ranked[0]?.score >= 5 ? ranked[0] : null;
+  }
+
+  async function geocodeCityCenter(city, countryId, countryName, places) {
+    const known = knownCityCenter(countryId, city);
+    if (known) return { ...known, labelEn: city };
+    try {
+      const hit = await photonCityLookup(city, countryName, places);
+      if (!hit) return null;
+      return { lat: hit.lat, lng: hit.lng, labelEn: hit.labelEn || city };
+    } catch {
+      return null;
+    }
   }
 
   async function resolveCityCenters() {
@@ -376,11 +402,24 @@ window.WorldApp = (() => {
       if (!city || city === "Other") continue;
       if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
       const key = cityCenterKey(p.countryId, city);
-      if (cityCenterCache.has(key) || knownCityCenter(p.countryId, city)) continue;
       if (!groups.has(key)) groups.set(key, { countryId: p.countryId, city, places: [] });
       groups.get(key).places.push(p);
     }
-    const pending = [...groups.values()];
+
+    const pending = [];
+    for (const g of groups.values()) {
+      const key = cityCenterKey(g.countryId, g.city);
+      const known = knownCityCenter(g.countryId, g.city);
+      const existing = cityCenterCache.get(key);
+      if (known && !existing) {
+        cityCenterCache.set(key, { ...known, labelEn: g.city });
+        continue;
+      }
+      const needsCoords = !Number.isFinite(existing?.lat) && !known;
+      const needsLabel = !existing?.labelEn;
+      if (needsCoords || needsLabel) pending.push(g);
+    }
+
     if (!pending.length) return;
     const batchSize = 5;
     for (let i = 0; i < pending.length; i += batchSize) {
@@ -389,8 +428,15 @@ window.WorldApp = (() => {
       await Promise.all(
         batch.map(async (g) => {
           const key = cityCenterKey(g.countryId, g.city);
-          const coords = await geocodeCityCenter(g.city, g.countryId, countryNameForId(g.countryId), g.places);
-          if (coords) cityCenterCache.set(key, coords);
+          const existing = cityCenterCache.get(key);
+          const known = knownCityCenter(g.countryId, g.city);
+          const result = await geocodeCityCenter(g.city, g.countryId, countryNameForId(g.countryId), g.places);
+          const fallback = fallbackCityCenter(g.places);
+          const lat = existing?.lat ?? known?.lat ?? result?.lat ?? fallback?.lat;
+          const lng = existing?.lng ?? known?.lng ?? result?.lng ?? fallback?.lng;
+          const labelEn = result?.labelEn || existing?.labelEn || g.city;
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          cityCenterCache.set(key, { lat, lng, labelEn });
         })
       );
       if (gen !== cityCenterResolveGen) return;
@@ -426,6 +472,7 @@ window.WorldApp = (() => {
       pins.push({
         countryId: g.countryId,
         city: g.city,
+        label: cityDisplayLabel(g.countryId, g.city),
         lat: center.lat,
         lng: center.lng,
         placeCount: g.places.length,
