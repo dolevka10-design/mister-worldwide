@@ -595,9 +595,12 @@ html, body {
 .globe-toolbar { top: 0.4rem; right: 0.4rem; }
 .globe-rotate-btn { font-size: 0.72rem; padding: 0.28rem 0.5rem; }
 
-body.country-panel-open .globe-wrap,
-body.overlay-panel-open .globe-wrap {
+body.country-panel-open .globe-wrap {
   pointer-events: none;
+}
+body.overlay-panel-open .globe-wrap {
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 body.country-panel-open .globe-canvas .globe-flag-pin,
 body.country-panel-open .globe-canvas .globe-city-pin,
@@ -717,11 +720,12 @@ body.overlay-panel-open .globe-canvas .scene-container > div {
   border-top: 1px solid var(--border);
   transform: translateY(100%);
   transition: transform 0.3s ease;
-  z-index: 46;
+  z-index: 60;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow);
   overflow: hidden;
+  isolation: isolate;
 }
 .planner-tabs {
   display: flex;
@@ -1987,8 +1991,11 @@ body.assist-open .assist-fab { visibility: hidden; pointer-events: none; }
     border-top: 1px solid var(--border);
   }
   .planner-panel {
-    top: auto; height: auto; max-height: min(92dvh, 100dvh);
-    border-radius: 16px 16px 0 0;
+    top: 0;
+    bottom: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
   }
   .assist-fab { right: 1.25rem; bottom: 1.25rem; width: 56px; height: 56px; font-size: 1.4rem; }
   body.assist-open .assist-fab { visibility: visible; pointer-events: auto; }

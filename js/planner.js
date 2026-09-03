@@ -1794,6 +1794,7 @@ window.WorldPlanner = (() => {
     const state = stateIn || WorldApp.getState();
     const panel = $("planner-panel");
     if (!panel) return;
+    if (open) WorldApp.setOverlayPanel?.("planner", true);
     ensurePlanner(state);
     syncUiFromState(state);
     const body = panel.querySelector(".planner-body");
@@ -1866,13 +1867,8 @@ window.WorldPlanner = (() => {
     trip.activeDayNum = n;
     showCreate = false;
     tripListOpen = false;
-    open = true;
+    syncPlannerShell(true);
     lastScroll = 0;
-    const panel = $("planner-panel");
-    if (panel) {
-      panel.classList.add("open");
-      panel.hidden = false;
-    }
     try {
       rememberNav(state);
     } catch { /* */ }
@@ -2350,14 +2346,21 @@ window.WorldPlanner = (() => {
     } catch { /* */ }
   }
 
-  function toggle(on) {
-    open = on != null ? !!on : !open;
+  function syncPlannerShell(shouldOpen) {
+    open = !!shouldOpen;
     const panel = $("planner-panel");
     if (!panel) return;
     panel.classList.toggle("open", open);
     panel.hidden = !open;
     WorldApp.setOverlayPanel?.("planner", open);
-    if (open) {
+  }
+
+  function toggle(on) {
+    const next = on != null ? !!on : !open;
+    syncPlannerShell(next);
+    const panel = $("planner-panel");
+    if (!panel) return;
+    if (next) {
       const st = WorldApp.getState();
       const planner = ensurePlanner(st);
       restorePlannerNav(st);

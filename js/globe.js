@@ -930,7 +930,12 @@ window.WorldGlobe = (() => {
   function setPinsVisible(visible) {
     pinsVisible = !!visible;
     container?.classList.toggle("globe-pins-suppressed", !visible);
-    if (!globe || dayMode) return;
+    if (!globe) return;
+    if (!visible) {
+      globe.htmlElementsData([]);
+      return;
+    }
+    if (dayMode) return;
     applyPinView();
   }
 
